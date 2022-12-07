@@ -6,15 +6,10 @@ venv/*
 envformosa*
 
 # cache folder
-__pycache__/*
-mnemonic/__pycache__/*
-mnemonic/themes/__pycache__/*
+**/__pycache__/*
 
 # edition folder
-mnemonic/edit_themes/Data.json
-mnemonic/edit_themes/Data.txt
-mnemonic/edit_themes/main.json
-
+tools/edit_themes/*
 
 # IDE folder
 .idea/*
