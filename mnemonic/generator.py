@@ -5,10 +5,11 @@ from mnemonic import Mnemonic
 # This prevents IDE from creating a cache file
 sys.dont_write_bytecode = True
 
+
 class Generator:
     def __init__(self, entropy_size: int, chosen_theme: str, entropy):
         # Pick "finances" as default, if no theme is given
-        chosen_theme = (chosen_theme if chosen_theme is not None else "finances")
+        chosen_theme = (chosen_theme if chosen_theme is not None else "BIP39")
         self.m = Mnemonic(chosen_theme)
         self.phrase_len = len(self.m.words_dictionary["FILLING_ORDER"])
         # Pick random if the entropy input is none
@@ -32,17 +33,15 @@ class Generator:
         return self.phrase
 
 
-if len(sys.argv) == 1:
-    theme = "finances"
-    number_phrases = 8
-elif len(sys.argv) == 2:
+theme = "BIP39"
+# For BIP39 the number of words is 3*number_phrases
+number_phrases = 4
+if len(sys.argv) == 2:
     if sys.argv[1].isdigit():
         number_phrases = int(sys.argv[1])
-        theme = "finances"
     else:
         theme = sys.argv[1]
-        number_phrases = 8
-else:
+elif len(sys.argv) > 2:
     theme = sys.argv[1] if not sys.argv[1].isdigit() else sys.argv[2]
     number_phrases = int(sys.argv[1]) if sys.argv[1].isdigit() else int(sys.argv[2])
 
