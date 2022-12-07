@@ -35,6 +35,7 @@ class Generator:
 
 theme = "BIP39"
 # For BIP39 the number of words is 3*number_phrases
+# This is it because BIP39 uses 11bits per world and formosa uses 33bits per phrase
 number_phrases = 4
 if len(sys.argv) == 2:
     if sys.argv[1].isdigit():
