@@ -181,10 +181,9 @@ class ThemeDict(dict):
             All words used in the theme
             Compatible with original mnemonic
         """
-        # Remove duplicates with list(dict.fromkeys(x))
-        wordlist = list(dict.fromkeys([self[each_fill_word].total_words
-                                       for each_fill_word in self.filling_order
-                                       if each_fill_word in self.keys()]))
+        wordlist = list(itertools.chain([self[each_fill_word].total_words
+                                         for each_fill_word in self.filling_order
+                                         if each_fill_word in self.keys()]))[0]
         return wordlist
 
 
