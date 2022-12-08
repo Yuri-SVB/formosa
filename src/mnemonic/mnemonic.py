@@ -175,6 +175,18 @@ class ThemeDict(dict):
         assert words_per_phrase == len(self.natural_order)
         return words_per_phrase
 
+    @property
+    def wordlist(self) -> list[str]:
+        """
+            All words used in the theme
+            Compatible with original mnemonic
+        """
+        # Remove duplicates with list(dict.fromkeys(x))
+        wordlist = list(dict.fromkeys([self[each_fill_word].total_words
+                                       for each_fill_word in self.filling_order
+                                       if each_fill_word in self.keys()]))
+        return wordlist
+
 
 class Verifier:
     def __init__(self):
@@ -457,6 +469,7 @@ class Mnemonic(object):
         verifier = Verifier()
         verifier.set_verify_file(self.words_dictionary)
         verifier.start_verification()
+        self.wordlist = self.words_dictionary.wordlist
 
     @staticmethod
     def _get_directory() -> Path:
