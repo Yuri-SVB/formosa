@@ -1,18 +1,20 @@
 # Files and folders to be ignored.
 
-# env folder
-env*
-venv/*
-envformosa*
+build/
+dist/
+mnemonic.egg-info/
+.tox/
+.python-version
 
-# cache folder
+# virtual env folder
+env/*
+.env/*
+venv/*
+.venv/*
+
+# cache folders and files
 **/__pycache__/*
+*.pyc
 
 # edition folder
 tools/edit_themes/*
-
-# IDE folder
-.idea/*
-
-# Errors log
-LogErrors/*
