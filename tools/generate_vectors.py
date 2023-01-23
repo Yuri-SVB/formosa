@@ -24,23 +24,23 @@ if __name__ == "__main__":
     out = {}
     seed(1337)
 
-    for lang in ["english"]:  # Mnemonic.list_languages():
-        mnemo = Mnemonic(lang)
-        out[lang] = []
+    for theme in ["BIP39"]:  # Mnemonic.find_themes():
+        mnemo = Mnemonic(theme)
+        out[theme] = []
 
         # Generate corner cases
         data = []
         for length in range(16, 32 + 1, 8):
             for b in ["00", "7f", "80", "ff"]:
-                process(b * length, out[lang])
+                process(b * length, out[theme])
 
         # Generate random seeds
         for i in range(12):
             data = "".join(chr(choice(range(0, 256))) for _ in range(8 * (i % 3 + 2)))
             data = data.encode("latin1")
-            process(data.hex(), out[lang])
+            process(data.hex(), out[theme])
 
-    with open("vectors.json", "w") as f:
+    with open("vectors2.json", "w") as f:
         json.dump(
             out, f, sort_keys=True, indent=4, separators=(",", ": "), ensure_ascii=False
         )
