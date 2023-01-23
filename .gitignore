@@ -11,10 +11,15 @@ env/*
 .env/*
 venv/*
 .venv/*
+envformosa/*
+venvformosa/*
 
 # cache folders and files
 **/__pycache__/*
-*.pyc
+**.pyc
 
 # edition folder
 tools/edit_themes/*
+
+# IDE folder
+.idea/
