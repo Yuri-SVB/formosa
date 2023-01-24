@@ -4,7 +4,7 @@ import json
 from random import choice, seed
 
 from bip32utils import BIP32Key
-from mnemonic import Mnemonic
+from src.mnemonic.mnemonic import Mnemonic
 
 
 def process(data, lst):
@@ -40,7 +40,7 @@ if __name__ == "__main__":
             data = data.encode("latin1")
             process(data.hex(), out[theme])
 
-    with open("vectors2.json", "w") as f:
+    with open("vectors.json", "w") as f:
         json.dump(
             out, f, sort_keys=True, indent=4, separators=(",", ": "), ensure_ascii=False
         )

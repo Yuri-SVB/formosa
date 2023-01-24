@@ -532,6 +532,7 @@ class TableSelectorTab(BaseTab):
         [each_widget.setEnabled(not state) for each_widget in self.panel_widgets]
         self.natural_word = self.parent.base_dict.natural_order[0]
         self.new_grid()
+        self.setFocus()
 
     def init_label_objects(self):
         """ Configure the objects in the grid of the Table Selector tab, all labels must initialize hidden"""
@@ -554,17 +555,16 @@ class TableSelectorTab(BaseTab):
             row_len_limited.update({each_syntactic_word: returned_bools})
 
         font_sizes = {}
-        for each_syntactic_word in syntactic_word_list:
-            if row_len_limited[each_syntactic_word]:
-                font_sizes.update({each_syntactic_word: 7})
-            else:
-                font_sizes.update({each_syntactic_word: 8})
+        [font_sizes.update({each_syntactic_word: 7 if row_len_limited[each_syntactic_word] else 8})
+         for each_syntactic_word in syntactic_word_list]
 
         # Write the characters in column, line and paragraph indexes
         self.column_objects = [QLabel(parent=self, text=self.input_set_column[column])
                                for column in range(a)]
+        # Index line is get by repeating 0 to 'a' for 'a' times, e.g. [0, ...7, 0, ...7, 0, ...7]
         self.line_objects = [QLabel(parent=self, text=self.input_set_line[line])
-                            for paragraph in range(a) for line in range(a)]
+                             for paragraph in range(a) for line in range(a)]
+        # Index line is get by repeating 0 'a' times to 'a', e.g. [0, 0, ..., 1, 1, ..., 7, 7]
         self.paragraph_objects = [QLabel(parent=self, text=self.input_set_paragraph[paragraph])
                                   for paragraph in range(a) for line in range(a)]
         [(each_object.setFont(self.font), each_object.hide())
@@ -653,7 +653,6 @@ class TableSelectorTab(BaseTab):
 
     def randomize_character_set(self):
         """ Randomize the indexes of the grid independently of each other in the Table Selector tab"""
-        a = self.COLUMN_LINE_PARAGRAPH_SIZE
         input_chars = self.input_character_set
         random.shuffle(input_chars)
         self.input_set_caseless = input_chars + list([each_char.swapcase() for each_char in input_chars])
@@ -872,29 +871,37 @@ class TableSelectorTab(BaseTab):
         Parameters
         ----------
         word :
-            This is the word selected that is get from the grid, it can None as not the whole grid is filled with words
-            also not all steps are evaluated because the filling order is not the same
-            as natural order of the language
+            This is the word selected that is get from the grid,
+            it can None as not the whole grid is filled with words
+            also not all steps are evaluated
+            because the filling order is not the same as natural order
         """
         checklist = self.picked_passphrase.copy()
         if word is not None:
+            # Slice the string to get the word after the hyphen
             checklist.append(word[word.find("-") + 1:])
         state = True
         themed_dict = self.parent.base_dict
         natural_order = themed_dict.natural_order
         filling_order = themed_dict.filling_order
+        # The number of complete phrases
         phrases_shift = (len(checklist) // len(natural_order)) * len(natural_order)
         check_size = len(checklist) % len(natural_order)
 
-        if (word is None and check_size != 0) or \
-                (word is not None and check_size != 1):
-            for filling_order_word in filling_order[1:check_size]:
-                if all(value in natural_order[:check_size] for value in filling_order[:check_size]):
-                    restricted_by = themed_dict[filling_order_word].restricted_by
-                    restricted_by_word = checklist[natural_order.index(restricted_by) + phrases_shift]
-                    state = False if checklist[natural_order.index(filling_order_word) + phrases_shift] not in \
-                                     themed_dict[restricted_by][filling_order_word]["MAPPING"][restricted_by_word] \
-                        else state
+        # If no word is selected and the size isn't zero
+        #  or a word is selected and the size isn't one
+        #  then it keep going, else it returns
+        if not ((not word and check_size != 0) or (word and check_size != 1)):
+            self.set_validation_colored_msg(state)
+            return
+        for filling_order_word in filling_order[1:check_size]:
+            if not all(value in natural_order[:check_size] for value in filling_order[:check_size]):
+                continue
+            restricted_by = themed_dict[filling_order_word].restricted_by
+            restricted_by_word = checklist[natural_order.index(restricted_by) + phrases_shift]
+            natural_index = themed_dict.natural_index(filling_order_word)
+            word_mapping = themed_dict[restricted_by][filling_order_word].mapping[restricted_by_word]
+            state = False if checklist[natural_index + phrases_shift] not in word_mapping else state
 
         self.set_validation_colored_msg(state)
 
