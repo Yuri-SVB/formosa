@@ -480,7 +480,21 @@ class ThemeDict(dict):
         led_by_index = self.natural_index(self[syntactic_key].restricted_by)
         return led_by_index
 
-    def get_lead_list(self, syntactic_key, sentence: list):
+    def get_lead_list(self, syntactic_key: str, sentence: list) -> list[str]:
+        """
+            Get the list of words led by the given syntactic word
+
+        Parameters
+        ----------
+        syntactic_key : str
+            The syntactic word which leads the list
+        sentence : list
+            The sentence to solve the leading when the desired list depends on the leading words
+        Returns
+        -------
+        list[str]
+            Return the list led by a syntactic word
+        """
         if syntactic_key in self.prime_syntactic_leads:
             lead_list = self[syntactic_key].total_words
         else:
@@ -518,8 +532,19 @@ class ThemeDict(dict):
             current_sentence[syntactic_order] = list_of_words[word_index]
         return current_sentence
 
-    def get_sentences_from_bits(self, data_bits: str):
+    def get_sentences_from_bits(self, data_bits: str) -> list[str]:
+        """
+            Get the mnemonic sentences in the natural speech order from given string of bits
 
+        Parameters
+        ----------
+        data_bits : str
+            The bits of the entropy and checksum to get the sentences from
+        Returns
+        -------
+        list[str]
+            Return a list of words forming the sentences of the mnemonic
+        """
         phrases_amount = len(data_bits) // self.bits_per_phrase
         sentences = []
         for phrase_index in range(phrases_amount):
