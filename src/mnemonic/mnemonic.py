@@ -981,7 +981,6 @@ class Mnemonic(object):
             error_message = "Number of bytes should be multiple of %s, but it is %s."
             raise ValueError(error_message % (least_multiple, len(data)))
 
-        # bits_per_phrase = self.words_dictionary.bits_per_phrase
         hash_digest = hashlib.sha256(data).hexdigest()
         entropy_bits = bin(int.from_bytes(data, byteorder="big"))[2:].zfill(len(data) * 8)
         checksum_bits = bin(int(hash_digest, 16))[2:].zfill(256)[: len(data) * 8 // 32]
