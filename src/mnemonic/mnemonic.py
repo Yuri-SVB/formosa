@@ -671,7 +671,7 @@ class Verifier:
             self._check_enough_keys(mapping_key, line_bits_length)
             self._check_complete_list(mapping_key)
             self._check_space_char_specific(mapping_key)
-        self._check_unicity()
+        self.check_general_unicity()
 
     def _check_enough_keys(self, mapping_key: list[str], line_bits_length: int):
         """
@@ -734,7 +734,7 @@ class Verifier:
             error_message = "Space character found in sublist of %s %s"
             raise VerificationFailed(error_message % (self.current_word.lower(), mapping_key))
 
-    def _check_unicity(self):
+    def check_general_unicity(self):
         """ """
         if self.current_word in self.theme_loaded.prime_syntactic_leads:
             list_length = 2 ** self.current_dict.bit_length
