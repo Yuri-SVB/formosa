@@ -555,7 +555,8 @@ class ThemeDict(dict):
 
 
 class Verifier:
-    def __init__(self):
+    def __init__(self, mnemonic_parent):
+        self.parent = mnemonic_parent
         self.theme_loaded = ThemeDict()
         self.current_word = ""
         self.current_restriction = ""
@@ -670,6 +671,7 @@ class Verifier:
             self._check_enough_keys(mapping_key, line_bits_length)
             self._check_complete_list(mapping_key)
             self._check_space_char_specific(mapping_key)
+        self._check_unicity()
 
     def _check_enough_keys(self, mapping_key: list[str], line_bits_length: int):
         """
@@ -732,6 +734,30 @@ class Verifier:
             error_message = "Space character found in sublist of %s %s"
             raise VerificationFailed(error_message % (self.current_word.lower(), mapping_key))
 
+    def _check_unicity(self):
+        """ """
+        if self.current_word in self.theme_loaded.prime_syntactic_leads:
+            list_length = 2 ** self.current_dict.bit_length
+            sublists = self.theme_loaded[self.current_word].total_words
+            self.check_password_unicity(sublists, list_length)
+
+        list_length = 2 ** self.next_dictionary.bit_length
+        for mapping_key in self.led_words.mapping.keys():
+            sublists = self.led_words.mapping[mapping_key]
+            self.check_password_unicity(sublists, list_length)
+
+    def check_password_unicity(self, sublists, list_length):
+        """ """
+        # Concatenate the first n letters of each word in a set
+        # If the word in BIP39 has 3 letters finish with "-"
+        n = 4 if self.parent.is_bip39_theme else 2
+        password = set([w[:n] if len(w) >= n else w+"-" for w in sublists])
+        if len(password) != list_length:
+            error_message = "The list of %s in the %s has no unicity."
+            raise VerificationFailed(
+                error_message % (self.current_restriction.lower()+"s", self.current_word.lower())
+            )
+
 
 # Refactored code segments from <https://github.com/keis/base58>
 def b58encode(v: bytes) -> str:
@@ -765,7 +791,7 @@ class Mnemonic(object):
             with open(theme_file) as json_file:
                 self.words_dictionary = ThemeDict(json.load(json_file))
             if test_theme:
-                verifier = Verifier()
+                verifier = Verifier(self)
                 verifier.set_verify_theme(self.words_dictionary)
                 verifier.start_verification()
         else:
