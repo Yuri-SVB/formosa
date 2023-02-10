@@ -735,24 +735,32 @@ class Verifier:
             raise VerificationFailed(error_message % (self.current_word.lower(), mapping_key))
 
     def check_general_unicity(self):
-        """ """
+        """
+            Check the theme unicity
+            The unicity means the words in the same list should have the unique first letters
+        """
         if self.current_word in self.theme_loaded.prime_syntactic_leads:
-            list_length = 2 ** self.current_dict.bit_length
-            sublists = self.theme_loaded[self.current_word].total_words
-            self.check_password_unicity(sublists, list_length)
+            sublist = self.theme_loaded[self.current_word].total_words
+            self.check_list_unicity(sublist)
 
-        list_length = 2 ** self.next_dictionary.bit_length
         for mapping_key in self.led_words.mapping.keys():
-            sublists = self.led_words.mapping[mapping_key]
-            self.check_password_unicity(sublists, list_length)
+            sublist = self.led_words.mapping[mapping_key]
+            self.check_list_unicity(sublist)
 
-    def check_password_unicity(self, sublists, list_length):
-        """ """
+    def check_list_unicity(self, sublist: list[str]):
+        """
+            Check the unicity in a given list of words with the difference of list and set sizes
+
+        Parameters
+        ----------
+        sublist : list[str]
+            The list of led words which should have the letters unicity
+        """
         # Concatenate the first n letters of each word in a set
         # If the word in BIP39 has 3 letters finish with "-"
         n = 4 if self.parent.is_bip39_theme else 2
-        password = set([w[:n] if len(w) >= n else w+"-" for w in sublists])
-        if len(password) != list_length:
+        unique_list = set([w[:n] if len(w) >= n else w+"-" for w in sublist])
+        if len(unique_list) != len(sublist) and len(sublist):
             error_message = "The list of %s in the %s has no unicity."
             raise VerificationFailed(
                 error_message % (self.current_restriction.lower()+"s", self.current_word.lower())
