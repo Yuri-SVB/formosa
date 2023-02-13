@@ -1,7 +1,7 @@
 import unittest
 import json
 from pathlib import Path
-from src.mnemonic.mnemonic import ThemeDict
+from src.mnemonic.mnemonic import ThemeDict, Mnemonic
 
 
 class VerificationFailed(Exception):
@@ -9,8 +9,10 @@ class VerificationFailed(Exception):
 
 
 class Verifier:
-    def __init__(self, mnemonic_parent):
-        self.parent = mnemonic_parent
+    DEFAULT_THEME = "BIP39"
+
+    def __init__(self, theme_name: str = ""):
+        self.is_bip39 = theme_name.startswith(self.DEFAULT_THEME)
         self.theme_loaded = ThemeDict()
         self.current_word = ""
         self.current_restriction = ""
@@ -212,7 +214,7 @@ class Verifier:
         """
         # Concatenate the first n letters of each word in a set
         # If the word in BIP39 has 3 letters finish with "-"
-        n = 4 if self.parent.is_bip39_theme else 2
+        n = 4 if self.is_bip39 else 2
         unique_list = set([w[:n] if len(w) >= n else w+"-" for w in sublist])
         if len(unique_list) != len(sublist) and len(sublist):
             error_message = "The list of %s in the %s has no unicity."
@@ -240,7 +242,7 @@ class VerifierTestCase(unittest.TestCase):
         """
         self._load_test_file()
         theme_to_verify = ThemeDict(self.test_file)
-        verifier = Verifier(theme_to_verify)
+        verifier = Verifier()
         verifier.set_verify_theme(theme_to_verify)
         verifier.start_verification()
         self.assertTrue(verifier.validated)
@@ -251,7 +253,7 @@ class VerifierTestCase(unittest.TestCase):
         """
         self._load_test_file()
         theme_to_verify = ThemeDict(self.test_file)
-        verifier = Verifier(theme_to_verify)
+        verifier = Verifier()
         verifier.set_verify_theme(theme_to_verify)
 
         for each_key, each_value in self.test_file.items():
@@ -262,6 +264,34 @@ class VerifierTestCase(unittest.TestCase):
             verifier.set_verify_theme(theme_with_fail)
             with self.assertRaises(VerificationFailed):
                 verifier.start_verification()
+
+    def test_themes(self):
+        """
+            Find and test all themes with the Verifier object
+        """
+        themes = Mnemonic.find_themes()
+        for each_theme in themes:
+            self._check_list(each_theme)
+
+    def _check_list(self, theme: str):
+        """
+            For each found theme test it with the Verifier
+
+        Parameters
+        ----------
+        theme : str
+            The name of the theme to be verified
+        """
+        formosa_path = Path(__file__).parent.parent.absolute()
+        theme_file = formosa_path / Path("src") / Path("mnemonic") / Path("themes") / Path("%s.json" % theme)
+        if Path.exists(theme_file) and Path.is_file(theme_file):
+            with open(theme_file) as json_file:
+                self.words_dictionary = ThemeDict(json.load(json_file))
+        else:
+            raise FileNotFoundError("Theme file not found")
+        verifier = Verifier(theme)
+        verifier.set_verify_theme(self.words_dictionary)
+        verifier.start_verification()
 
 
 def __main__() -> None:
