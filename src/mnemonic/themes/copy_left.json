@@ -72,7 +72,7 @@
         "SUBJECT",
         "OBJECT",
         "ADJECTIVE",
-        "POSSESSIVE",
+        "WILDCARD",
         "PLACE"
     ],
     "NATURAL_ORDER": [
@@ -81,7 +81,7 @@
         "OBJECT",
         "ADJECTIVE",
         "PLACE",
-        "POSSESSIVE"
+        "WILDCARD"
     ],
     "OBJECT": {
         "ADJECTIVE": {
@@ -5902,7 +5902,7 @@
     "PLACE": {
         "BIT_LENGTH": 5,
         "LEADS": [],
-        "LED_BY": "POSSESSIVE",
+        "LED_BY": "WILDCARD",
         "TOTAL_LIST": [
             "ale_house",
             "altar",
@@ -5992,7 +5992,7 @@
             "waterfall"
         ]
     },
-    "POSSESSIVE": {
+    "WILDCARD": {
         "BIT_LENGTH": 6,
         "LEADS": [
             "PLACE"
@@ -10577,7 +10577,7 @@
         "BIT_LENGTH": 6,
         "LEADS": [
             "OBJECT",
-            "POSSESSIVE"
+            "WILDCARD"
         ],
         "LED_BY": "VERB",
         "OBJECT": {
@@ -19181,7 +19181,7 @@
                 ]
             }
         },
-        "POSSESSIVE": {
+        "WILDCARD": {
             "IMAGE": [
                 "3blind_mice",
                 "3little_pigs",

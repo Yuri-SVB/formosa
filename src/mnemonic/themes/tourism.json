@@ -81,7 +81,7 @@
         "VERB",
         "SUBJECT",
         "OBJECT",
-        "POSSESSIVE",
+        "WILDCARD",
         "PLACE",
         "ADJECTIVE"
     ],
@@ -91,7 +91,7 @@
         "OBJECT",
         "ADJECTIVE",
         "PLACE",
-        "POSSESSIVE"
+        "WILDCARD"
     ],
     "OBJECT": {
         "BIT_LENGTH": 6,
@@ -5706,7 +5706,7 @@
         "LEADS": [
             "ADJECTIVE"
         ],
-        "LED_BY": "POSSESSIVE",
+        "LED_BY": "WILDCARD",
         "TOTAL_LIST": [
             "5star_hotel",
             "6star_hotel",
@@ -5870,7 +5870,7 @@
             "zurich"
         ]
     },
-    "POSSESSIVE": {
+    "WILDCARD": {
         "BIT_LENGTH": 6,
         "LEADS": [
             "PLACE"
@@ -10746,7 +10746,7 @@
         "BIT_LENGTH": 6,
         "LEADS": [
             "OBJECT",
-            "POSSESSIVE"
+            "WILDCARD"
         ],
         "LED_BY": "VERB",
         "OBJECT": {
@@ -19881,7 +19881,7 @@
                 ]
             }
         },
-        "POSSESSIVE": {
+        "WILDCARD": {
             "IMAGE": [
                 "academic",
                 "adventurer",

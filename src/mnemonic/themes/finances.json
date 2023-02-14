@@ -79,7 +79,7 @@
         "SUBJECT",
         "OBJECT",
         "ADJECTIVE",
-        "POSSESSIVE",
+        "WILDCARD",
         "PLACE"
     ],
     "NATURAL_ORDER": [
@@ -88,7 +88,7 @@
         "OBJECT",
         "ADJECTIVE",
         "PLACE",
-        "POSSESSIVE"
+        "WILDCARD"
     ],
     "OBJECT": {
         "ADJECTIVE": {
@@ -10221,7 +10221,7 @@
     "PLACE": {
         "BIT_LENGTH": 5,
         "LEADS": [],
-        "LED_BY": "POSSESSIVE",
+        "LED_BY": "WILDCARD",
         "TOTAL_LIST": [
             "5star_hotel",
             "6star_hotel",
@@ -10340,7 +10340,7 @@
             "zurich"
         ]
     },
-    "POSSESSIVE": {
+    "WILDCARD": {
         "BIT_LENGTH": 6,
         "LEADS": [
             "PLACE"
@@ -15444,7 +15444,7 @@
         "BIT_LENGTH": 6,
         "LEADS": [
             "OBJECT",
-            "POSSESSIVE"
+            "WILDCARD"
         ],
         "LED_BY": "VERB",
         "OBJECT": {
@@ -24980,7 +24980,7 @@
                 ]
             }
         },
-        "POSSESSIVE": {
+        "WILDCARD": {
             "IMAGE": [
                 "acquiree",
                 "adam_smith",

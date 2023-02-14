@@ -149,7 +149,7 @@
         "SUBJECT",
         "OBJECT",
         "ADJECTIVE",
-        "POSSESSIVE",
+        "WILDCARD",
         "PLACE"
     ],
     "NATURAL_ORDER": [
@@ -157,7 +157,7 @@
         "VERB",
         "ADJECTIVE",
         "OBJECT",
-        "POSSESSIVE",
+        "WILDCARD",
         "PLACE"
     ],
     "OBJECT": {
@@ -6895,7 +6895,7 @@
     },
     "PLACE": {
         "BIT_LENGTH": 5,
-        "LED_BY": "POSSESSIVE",
+        "LED_BY": "WILDCARD",
         "LEADS": [],
         "TOTAL_LIST": [
             "abyss",
@@ -7047,7 +7047,7 @@
             "waterfall"
         ]
     },
-    "POSSESSIVE": {
+    "WILDCARD": {
         "BIT_LENGTH": 6,
         "PLACE": {
             "IMAGE": [
@@ -28095,7 +28095,7 @@
                 ]
             }
         },
-        "POSSESSIVE": {
+        "WILDCARD": {
             "IMAGE": [
                 "acolyte",
                 "actor",
@@ -41835,7 +41835,7 @@
         "LED_BY": "VERB",
         "LEADS": [
             "OBJECT",
-            "POSSESSIVE"
+            "WILDCARD"
         ],
         "TOTAL_LIST": [
             "acolyte",
