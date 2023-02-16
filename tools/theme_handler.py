@@ -147,64 +147,58 @@ def remove_collisions(most_adequate_matrices, adequacy_matrices, data_rows):
         )
 
     most_adequate_matrices_nc = []
-    for relation_index in range(len(most_adequate_matrices)):
-        each_adequate_matrix = most_adequate_matrices[relation_index]
+    for each_adequate_matrix in most_adequate_matrices:
         most_adequate_matrix_nc = []
-        for column_index in range(len(each_adequate_matrix)):
-            each_column = each_adequate_matrix[column_index]
+        for each_column in each_adequate_matrix:
             # Copying the list without referencing it
             column_nc = list(each_column)
             first_letters = []
-            for word_index in range(len(each_column)):
-                each_word = each_column[word_index]
+            for each_word in each_column:
                 if each_word[0:2] in first_letters:
-                    # It cannot use word_index as index because the position of the word in column_nc
-                    #  will change while looping
-                    if " " in each_word:
-                        column_nc.append(column_nc.pop(column_nc.index(each_word)))
-                    else:
-                        column_nc.append(column_nc.pop(column_nc.index(each_word)))
+                    # Pop the word and send it to the end of the list
+                    column_nc.append(column_nc.pop(column_nc.index(each_word)))
                 first_letters.append(each_word[0:2])
             most_adequate_matrix_nc.append(column_nc)
         most_adequate_matrices_nc.append(most_adequate_matrix_nc)
     return most_adequate_matrices_nc
 
 
-def sort_adequate(main_dict, most_adequate_matrices_nc, relation_pairs):
+def sort_adequate(main_dict, most_adequate_matrices, relation_pairs):
     # It sorts the most adequate values without collisions
-    if len(most_adequate_matrices_nc) != len(relation_pairs):
+    if len(most_adequate_matrices) != len(relation_pairs):
         error_message = "Number of adequate matrices %d is different than the relation pairs %d"
-        raise ValueError(error_message % (len(most_adequate_matrices_nc), len(relation_pairs)))
+        raise ValueError(error_message % (len(most_adequate_matrices), len(relation_pairs)))
 
     sorted_matrices_nc = []
-    for matrix_index in range(len(most_adequate_matrices_nc)):
-        each_matrix_nc = most_adequate_matrices_nc[matrix_index]
-        bits = 2 ** (main_dict[relation_pairs[matrix_index][1]]["BIT_LENGTH"])
+    for matrix_index in range(len(most_adequate_matrices)):
+        each_matrix_nc = most_adequate_matrices[matrix_index]
+        bits = main_dict[relation_pairs[matrix_index][1]]["BIT_LENGTH"]
+        final_length = 2 ** bits
         sorted_matrix_nc = []
-        for column_index in range(len(each_matrix_nc)):
-            adequate_sorted = sorted(each_matrix_nc[column_index][:bits], reverse=True)
+        for each_column in each_matrix_nc:
+            adequate_sorted = sorted(each_column[:final_length], reverse=True)
             sorted_matrix_nc.append(adequate_sorted)
         sorted_matrices_nc.append(sorted_matrix_nc)
     return sorted_matrices_nc
 
 
-def update_dictionary(main_dict, most_adequate_matrices_nc, relation_pairs, data_columns):
+def update_dictionary(main_dict, most_adequate_matrices, relation_pairs, data_columns):
     # It formats the dictionary with keys and lists of words
-    if len(most_adequate_matrices_nc) != len(data_columns):
+    if len(most_adequate_matrices) != len(data_columns):
         raise ValueError(
             "Number of non-conflicted matrices \"%d\" is different than data columns \"%d\","
-            % (len(most_adequate_matrices_nc), len(data_columns))
+            % (len(most_adequate_matrices), len(data_columns))
         )
-    if len(most_adequate_matrices_nc) != len(relation_pairs):
+    if len(most_adequate_matrices) != len(relation_pairs):
         raise ValueError(
             "Number of non-conflicted matrices \"%d\" is different than the relation_pairs \"%d\","
-            % (len(most_adequate_matrices_nc), len(relation_pairs))
+            % (len(most_adequate_matrices), len(relation_pairs))
         )
 
     least_adequate_dict = {"ID": "least_adequate"}
-    for matrix_index in range(len(most_adequate_matrices_nc)):
+    for matrix_index in range(len(most_adequate_matrices)):
         relation_pair = relation_pairs[matrix_index]
-        most_adequate_matrix_nc = most_adequate_matrices_nc[matrix_index]
+        most_adequate_matrix_nc = most_adequate_matrices[matrix_index]
         if relation_pair[0] not in least_adequate_dict.keys():
             least_adequate_dict[relation_pair[0]] = {relation_pair[1]: {}}
         else:
