@@ -93,7 +93,6 @@ class MnemonicGeneratorTab(BaseTab):
         self.last_text = ""
         self.password_lines = []
         self.last_n_phrases = 0
-        self.valid_checkboxes = True
 
         # Widgets instantiation
         self.text_box = QTextEdit(self)
@@ -108,9 +107,7 @@ class MnemonicGeneratorTab(BaseTab):
         self.save_button = QPushButton(self)
         self.save_msg = QLabel(self)
         self.copy_msg = QLabel(self)
-        self.check_case.setEnabled(False)
-        self.check_char.setEnabled(False)
-        self.check_number.setEnabled(False)
+        self.enable_checkboxes()
 
     def config_tab(self):
         """ Set up widgets, config texts, commands and variables """
@@ -177,13 +174,18 @@ class MnemonicGeneratorTab(BaseTab):
         self.select_phrases.setValue(default_value)
         self.select_phrases.setWrapping(True)
 
-    def enable_checkboxes(self):
-        """ Enable or disable the checkboxes according to the theme selected and previous phrase generations"""
-        if self.valid_checkboxes:
-            state = self.is_bip39_theme
-            self.check_case.setEnabled(not state)
-            self.check_char.setEnabled(not state)
-            self.check_number.setEnabled(not state)
+    def enable_checkboxes(self, enable: bool = True):
+        """
+            Enable or disable the password checkboxes all together
+
+        Parameters
+        ----------
+        enable : bool
+            Enable or disable the checkboxes
+        """
+        self.check_case.setEnabled(enable)
+        self.check_char.setEnabled(enable)
+        self.check_number.setEnabled(enable)
 
     def generate_text(self):
         """ Call generate_format which build a mnemonic phrase in Formosa standard then updates displayed text"""
@@ -199,12 +201,13 @@ class MnemonicGeneratorTab(BaseTab):
         self.last_n_phrases = phrase_size
 
         self.update_text()
-        if not self.is_bip39_theme and self.valid_checkboxes:
-            self.insert_number()
-            self.insert_spc_char()
-            self.insert_swap_case()
-        else:
-            self.valid_checkboxes = False
+        self.insert_characters()
+
+    def insert_characters(self):
+        """ Change characters in passwords all together"""
+        self.insert_number()
+        self.insert_spc_char()
+        self.insert_swap_case()
 
     def update_text(self):
         """ Insert text in the box of Mnemonic Generator tab"""
@@ -223,7 +226,6 @@ class MnemonicGeneratorTab(BaseTab):
 
     def clear_text(self):
         """ Clear out the text box, copy label and save label in the Mnemonic Generator tab"""
-        self.valid_checkboxes = True
         self.enable_checkboxes()
         self.save_msg.hide()
         self.copy_msg.hide()
