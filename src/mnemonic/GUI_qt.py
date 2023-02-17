@@ -201,9 +201,9 @@ class MnemonicGeneratorTab(BaseTab):
         self.last_n_phrases = phrase_size
 
         self.update_text()
-        self.insert_characters()
+        self.change_password()
 
-    def insert_characters(self):
+    def change_password(self):
         """ Change characters in passwords all together"""
         self.insert_number()
         self.insert_spc_char()
