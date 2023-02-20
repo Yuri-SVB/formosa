@@ -205,9 +205,12 @@ class MnemonicGeneratorTab(BaseTab):
 
     def change_password(self):
         """ Change characters in passwords all together"""
-        self.insert_number()
-        self.insert_spc_char()
-        self.insert_swap_case()
+        if self.check_number.isChecked():
+            self.insert_number()
+        if self.check_char.isChecked():
+            self.insert_spc_char()
+        if self.check_case.isChecked():
+            self.insert_swap_case()
 
     def update_text(self):
         """ Insert text in the box of Mnemonic Generator tab"""
@@ -271,8 +274,8 @@ class MnemonicGeneratorTab(BaseTab):
         check_box_var : bool
             This variable tells if the word is written as natural, or it is already edited
         """
-        array_criteria = [each_char in self.last_text for each_char in to_replace]
-        if check_box_var and any(array_criteria):
+        array_criteria = any([each_char in self.last_text for each_char in to_replace])
+        if check_box_var and array_criteria:
             self.replace_characters(replace_by, to_replace, False)
         elif not check_box_var:
             self.replace_characters(to_replace, replace_by, True)
@@ -280,7 +283,7 @@ class MnemonicGeneratorTab(BaseTab):
 
     def replace_characters(self, insert: list[str], remove: list[str], check_var: bool = False):
         """
-            Replace a character given by another character given
+            Replace in the password a character by another character
 
         Parameters
         ----------
@@ -289,20 +292,23 @@ class MnemonicGeneratorTab(BaseTab):
         remove : list[str]
             The list of characters to be removed
         check_var : bool
-            Controls which criteria are used, if it is any or none element in the list
+            Prevent a changed character to be stuck
         """
         lines = self.last_text.splitlines(False)
         for line_index in self.password_lines:
-            # If there is any character to be removed in the line and
-            # there is any or none character inserted in the line depending on the control variable "check_var"
-            if any([each_char in lines[line_index] for each_char in remove]) and \
-                    check_var == any([each_char in lines[line_index] for each_char in insert]):
-                index_list = []
-                [index_list.append(lines[line_index].find(each_char)) for each_char in remove]
-                lesser_char = min([each_index for each_index in index_list if each_index >= 0])
-                lesser_char_index = remove.index(lines[line_index][lesser_char])
-                new_line = lines[line_index].replace(remove[lesser_char_index], insert[lesser_char_index], 1)
-                self.last_text = self.last_text.replace(lines[line_index], new_line)
+            password_line = lines[line_index]
+            character_index = [remove.index(each_char) for each_char in list(password_line) if each_char in remove]
+            changed_character = [each_char for each_char in list(password_line) if each_char in insert]
+
+            if not character_index:
+                continue
+            remove_char = remove[character_index[0]]
+            insert_char = insert[character_index[0]]
+            if changed_character and not check_var:
+                if password_line.index(changed_character[0]) < password_line.index(remove_char):
+                    continue
+            new_line = password_line.replace(remove_char, insert_char, 1)
+            self.last_text = self.last_text.replace(password_line, new_line)
 
 
 class ThemeConverterTab(BaseTab):
