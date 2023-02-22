@@ -244,14 +244,14 @@ class MnemonicGeneratorTab(BaseTab):
 
     def insert_number(self):
         """ Change an ordinary character to a number"""
-        to_replace = ["a", "e", "i", "o", "b", "g", "t"]
-        replace_by = ["4", "3", "1", "0", "8", "6", "7"]
+        to_replace = ["a", "b", "e", "g", "i", "o", "q", "s", "t"]
+        replace_by = ["4", "8", "3", "6", "1", "0", "9", "5", "7"]
         self.insert_character(to_replace, replace_by, self.check_number.isChecked())
 
     def insert_spc_char(self):
         """ Change an ordinary character to a special character"""
-        to_replace = ["c", "h", "l", "s", "j"]
-        replace_by = ["¢", "#", "£", "$", "!"]
+        to_replace = ["a", "c", "e", "h", "j", "l", "s", "t", "%"]
+        replace_by = ["@", "¢", "&", "#", "!", "£", "$", "+", "z"]
         self.insert_character(to_replace, replace_by, self.check_char.isChecked())
 
     def insert_swap_case(self):
