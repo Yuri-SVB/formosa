@@ -305,8 +305,7 @@ class MnemonicGeneratorTab(BaseTab):
             remove_char = remove[character_index[0]]
             insert_char = insert[character_index[0]]
 
-            # If there is a changed character closer to the beginning of the string than the char to be removed
-            # and the checkbox isn't selected then skip it
+            # If there is a changed character then skip it, preventing it to get stuck
             if changed_character and not checkbox_selected:
                 if password_line.index(changed_character[0]) < password_line.index(remove_char):
                     continue
