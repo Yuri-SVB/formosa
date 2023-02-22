@@ -263,7 +263,7 @@ class MnemonicGeneratorTab(BaseTab):
     def insert_character(self, to_replace: list, replace_by: list, check_box_var: bool):
         """
             Find out if the text in the texbox is written as natural or edited
-            and calls method replace_characters() with correct order of variables
+            and calls method replace_characters() with correct order of lists
 
         Parameters
         ----------
@@ -275,10 +275,9 @@ class MnemonicGeneratorTab(BaseTab):
             This variable tells if the word is written as natural, or it is already edited
         """
         array_criteria = any([each_char in self.last_text for each_char in to_replace])
-        if check_box_var and array_criteria:
-            self.replace_characters(replace_by, to_replace, False)
-        elif not check_box_var:
-            self.replace_characters(to_replace, replace_by, True)
+        if array_criteria:
+            replacement_order = (replace_by, to_replace) if check_box_var else (to_replace, replace_by)
+            self.replace_characters(replacement_order[0], replacement_order[1], not check_box_var)
         self.update_text()
 
     def replace_characters(self, insert: list[str], remove: list[str], checkbox_selected: bool = False):
