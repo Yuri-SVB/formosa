@@ -281,7 +281,7 @@ class MnemonicGeneratorTab(BaseTab):
             self.replace_characters(to_replace, replace_by, True)
         self.update_text()
 
-    def replace_characters(self, insert: list[str], remove: list[str], check_var: bool = False):
+    def replace_characters(self, insert: list[str], remove: list[str], checkbox_selected: bool = False):
         """
             Replace in the password a character by another character
 
@@ -291,8 +291,8 @@ class MnemonicGeneratorTab(BaseTab):
             The list of characters to be inserted
         remove : list[str]
             The list of characters to be removed
-        check_var : bool
-            Prevent a changed character to be stuck
+        checkbox_selected : bool
+            Indicate the respective checkbox selection, it prevents a changed character to be stuck
         """
         lines = self.last_text.splitlines(False)
         for line_index in self.password_lines:
@@ -302,9 +302,13 @@ class MnemonicGeneratorTab(BaseTab):
 
             if not character_index:
                 continue
+
             remove_char = remove[character_index[0]]
             insert_char = insert[character_index[0]]
-            if changed_character and not check_var:
+
+            # If there is a changed character closer to the beginning of the string than the char to be removed
+            # and the checkbox isn't selected then skip it
+            if changed_character and not checkbox_selected:
                 if password_line.index(changed_character[0]) < password_line.index(remove_char):
                     continue
             new_line = password_line.replace(remove_char, insert_char, 1)
