@@ -250,8 +250,8 @@ class MnemonicGeneratorTab(BaseTab):
 
     def insert_spc_char(self):
         """ Change an ordinary character to a special character"""
-        to_replace = ["a", "c", "e", "h", "j", "l", "s", "t", "%"]
-        replace_by = ["@", "¢", "&", "#", "!", "£", "$", "+", "z"]
+        to_replace = ["a", "c", "e", "h", "j", "l", "s", "t", "z"]
+        replace_by = ["@", "¢", "&", "#", "!", "£", "$", "+", "%"]
         self.insert_character(to_replace, replace_by, self.check_char.isChecked())
 
     def insert_swap_case(self):
