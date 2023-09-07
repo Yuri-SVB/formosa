@@ -23,9 +23,9 @@ Just like BIP39, It consists of two parts: generating the mnemonic and convertin
 it into a binary seed. This seed can be later used to generate deterministic wallets 
 using BIP-0032 or similar methods.
 
-**Since our work builds upon the original BIP39, many important parts of our technical 
-description will completely coincide with that of BIP39, and as a consequence, some excerpts 
-of this document will be verbatim transcriptions of those of BIP39.**
+Since our work builds upon the original BIP39, many important parts of our technical 
+description will completely coincide with that of BIP39, and as a consequence, some 
+excerpts of this document will be verbatim transcriptions of those of BIP39.
 
 ==Motivation==
 
@@ -54,8 +54,8 @@ he case for this format is very simple:
 * Its seeds that are much easier to memorize.
 
 An objection that is slightly harder to counter has to do with 
-knowledge-based authentication incurring in higher **vulnerability 
-to coercion**. Without having to enter the rabbit hole of coercion 
+knowledge-based authentication incurring in higher vulnerability 
+to coercion. Without having to enter the rabbit hole of coercion 
 resistance in self custody without obscurity, we can respond that 
 simply by noting that, unless the proposal is strict possession-
 based authentication, a hardware wallet will also need a good PIN, 
@@ -64,7 +64,7 @@ more so than BIP39), nothing requires it to be used specifically
 as a BTC seed and not as password.
 
 Finally, there is the objection that a system like it might induce 
-**over-customization** which would go against the idea of using BIP's 
+over-customization which would go against the idea of using BIP's 
 to define standards. To that I respond that BIP39 too has, in its 
 documentation, instructions on how to create your own 2048-words 
 dictionary, and yet, experience shows that the vast majority of real 
