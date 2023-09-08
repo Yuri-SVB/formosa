@@ -44,18 +44,18 @@ sentences (also known as brainwallets) into a wallet seed.
 
 ==Rationale==
 
-he case for this format is very simple: 
-* It keeps all BIP39 properties, specifically:
-   a) every 33 bits is checksum;
-   b) information density: 11 bits every 4 unique first letters;
-* It generalizes BIP39. Namely: the latter is a special case of the former;
-* Legacy BIP39 users can seamlessly adopt any Formosa theme (and vice-versa) without need to change addresses, because key derivation sets backwards conversion of seed to the equivalent BIP39 as preliminary step;
-* It's implementation in python is, in fact, very simple. With the possible exception of chekcsum (SHA256, likewise BIP39) it can be manually done by rolling dice and looking up a large paper table; Finally, all those properties being observed;
-* Its seeds that are much easier to memorize.
+The case for this format is very simple: 
+# It keeps all BIP39 properties, specifically:
+## every 33 bits is checksum;
+## information density: 11 bits every 4 unique first letters;
+# It generalizes BIP39. Namely: the latter is a special case of the former;
+# Legacy BIP39 users can seamlessly adopt any Formosa theme (and vice-versa) without need to change addresses, because key derivation sets backwards conversion of seed to the equivalent BIP39 as preliminary step;
+# It's implementation in python is, in fact, very simple. With the possible exception of chekcsum (SHA256, likewise BIP39) it can be manually done by rolling dice and looking up a large paper table; Finally, all those properties being observed;
+# Its seeds that are much easier to memorize.
 
 An objection that is slightly harder to counter has to do with 
-knowledge-based authentication incurring in higher vulnerability 
-to coercion. Without having to enter the rabbit hole of coercion 
+knowledge-based authentication incurring in ''higher vulnerability 
+to coercion''. Without having to enter the rabbit hole of coercion 
 resistance in self custody without obscurity, we can respond that 
 simply by noting that, unless the proposal is strict possession-
 based authentication, a hardware wallet will also need a good PIN, 
@@ -64,7 +64,7 @@ more so than BIP39), nothing requires it to be used specifically
 as a BTC seed and not as password.
 
 Finally, there is the objection that a system like it might induce 
-over-customization which would go against the idea of using BIP's 
+''over-customization'' which would go against the idea of using BIP's 
 to define standards. To that I respond that BIP39 too has, in its 
 documentation, instructions on how to create your own 2048-words 
 dictionary, and yet, experience shows that the vast majority of real 
@@ -106,25 +106,16 @@ MS = (ENT + CS) / 11
 
 ==Themes==
 
-<!-- An ideal wordlist has the following characteristics:
+The Formosa equivalent to a BIP39 dictionary, hence 'theme' should aim at the following characteristics:
 
-a) smart selection of words
-   - the wordlist is created in such a way that it's enough to type the first four
-     letters to unambiguously identify the word
-
-b) similar words avoided
-   - word pairs like "build" and "built", "woman" and "women", or "quick" and "quickly"
-     not only make remembering the sentence difficult but are also more error
-     prone and more difficult to guess
-
-c) sorted wordlists
-   - the wordlist is sorted which allows for more efficient lookup of the code words
-     (i.e. implementations can use binary search instead of linear search)
-   - this also allows trie (a prefix tree) to be used, e.g. for better compression
-
-The wordlist can contain native characters, but they must be encoded in UTF-8
-using Normalization Form Compatibility Decomposition (NFKD).
- -->
+# '''specific semantic scope, aka memory block''' the entire vocabulary should be adherent to a certain topic or theme;
+# '''avoid abstract syntax / morphology''' cathegories should consist of elements easily associable to mental images, even without context. Thumb rule is to resort only to nouns and adjectives;
+# '''sorted wordlists''' just like in BIP39 (or, in general), that imparts performance enhancement for software
+and human usage;
+# '''first-letters unicity''' aim at having words of each list not having first few letters in common with any other. Our experience suggests that good figures would be first-2-letters uniqueness for lists of 64 or 128 elements. That yield information densities higher than that of BIP39 of 11/4 = 2.75. The following are upsides associated to maximizing this metric:
+## '''more efficient muscle-memorization of password typing''';
+## '''faster password typing for the same given strength''';
+## '''more cryptographic strength in a given limited number of characters allowed for a passwrod'''.
 
 ==From mnemonic to seed==
 
@@ -155,25 +146,22 @@ generates a valid seed (and thus a deterministic wallet) but only the correct on
 will make the desired wallet available.
  -->
  
-==Themes==
+==Custom Themes==
 
-<!-- Since the vast majority of BIP39 wallets supports only the English wordlist,
-it is '''strongly discouraged''' to use non-English wordlists for generating
-the mnemonic sentences.
+Likewise in BIP39, adoption of non-standard themes is '''strongly discouraed'''. 
+The following risks are associated to that, particularly for users lacking training in 
+IT skills:
+# imposes the responsibility to make sure correct theme file will be available under the risk of catastrophic deadlock;
+# risk of custom theme being buggy or lacking one or more aforementioned security or UX properties;
+# risk of compatibility bug;
 
-If you still feel your application really needs to use a localized wordlist,
-use one of the following instead of inventing your own.
-
-* [[bip-0039/bip-0039-wordlists.md|Wordlists]]
- -->
-==Test vectors==
-
+On the other hand, users with propert training who understand well what they are doing 
+may obtain the following benefits:
+# higher memorization efficiency;
+# extra layer of obscurity / steganography;
 
 ==Reference Implementation==
 
 Reference implementation including wordlists is available from
 
 https://github.com/Yuri-SVB/formosa/
-
-Dart:
-<!-- * https://github.com/dart-bitcoin/bip39 -->
