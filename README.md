@@ -42,25 +42,43 @@ Clone the release branch by running the following command on the terminal:
 git clone https://github.com/Yuri-SVB/formosa.git
 ```
 #### To run graphical user interface on your own environment
-1. Navigate to the "mnemonic" folder
-2. Run the GUI_qt.py file on Python
+1. Change directory to the project directory that has just been cloned
+```console
+cd formosa
+```
+2. Build virtual environment (this command only has to be entered upon cloning):
+```console
+source venv_setup.sh
+```
+3. Activate virtual environment:
+```console
+source envformosa/bin/activate
+```
+4. Run the GUI_qt.py file on Python
+```console
+python3 src/mnemonic/GUI_qt.py
+```
 
 #### To run source code on terminal
-1. In your local repository, navigate to the "mnemonic" folder
+1. Repeat steps from 1, 2 and 3 of instructions to run in GUI;
 2. On Python, run the following command:
 
 ```console
 python3 mnemonic.py theme cryptographic_strength
 ```
-This will generate eight finances-themed mnemonic sentences and its derived password by default. To change the number of phrases and/or theme, use the following arguments. Available themes include:
+Change the arguments "theme" and "cryptographic_strength" accordingly. Available themes include:
 
-- role_play
+- medieval_fantasy
+- medieval_fantasy_light
 - sci-fi
 - copy_left (fairy tales and mythology)
 - tourism
 - finances
 
 The cryptographic strength argument refers to how hard it is to crack the password by brute-force. It is a multiple of 32 between 32 and 256. Thumb rule is 64 is good for non critical password and 128 is good enough for most applications. In fact 128 bits of entropy is, in fact, the most used standard for cryptocurrency seeds, as deemed adequate by the author. From 160 to 256 is tin-foil hat territory.
+
+Below are examples. Users are advised **not** to utilize any of them as passwords
+or seeds since they are published:
 
 **Command**
 ```console
