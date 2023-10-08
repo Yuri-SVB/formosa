@@ -207,7 +207,7 @@ Special thanks to:
 * [Daniel Santos](https://www.linkedin.com/in/daniel-san/)
 
 For more information and to collaborate:
-* visit: [formosadefense.com/](https://formosadefense.com/);
+* visit: [linktr.ee/formosat3](https://linktr.ee/formosat3);
 * read the article on Toptal's technology block: [toptal.com/cryptocurrency/formosa-crypto-wallet-management](https://www.toptal.com/cryptocurrency/formosa-crypto-wallet-management);
 * follow us on Twitter at: [@yurivillasboas](https://twitter.com/yurivillasboas);
 * contribute at: [geyser.fund/project/formosa](https://geyser.fund/project/formosa).
