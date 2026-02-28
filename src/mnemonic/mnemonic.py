@@ -842,9 +842,12 @@ class Mnemonic(object):
         if isinstance(mnemonic, list):
             mnemonic = " ".join(mnemonic)
         mnemonic_list = self.normalize_string(mnemonic).split(" ")
-        # Test the mnemonic length for BIP39 or other theme in each case
-        if self.is_bip39_theme and len(mnemonic_list) not in [i for i in range(3, 25, 3)] or \
-                not self.is_bip39_theme and len(mnemonic_list) not in [i for i in range(6, 49, 6)]:
+        # Test the mnemonic length: valid lengths depend on entropy (32-256 bits, multiples of 32)
+        words_dict = self.words_dictionary
+        bpp = words_dict.bits_per_phrase
+        wpp = words_dict.words_per_phrase
+        valid_lengths = [(ent + ent // 32) // bpp * wpp for ent in range(32, 257, 32)]
+        if len(mnemonic_list) not in valid_lengths:
             return False
         words_dict = self.words_dictionary
         phrase_amount = words_dict.get_phrase_amount(mnemonic_list)
