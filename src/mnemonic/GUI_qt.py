@@ -1,14 +1,29 @@
 from PyQt5.QtWidgets import (QMainWindow, QApplication, QWidget, QTabWidget, QLabel, QPushButton, QComboBox,
-                             QSpinBox, QLineEdit, QTextEdit, QVBoxLayout, QGridLayout, QCheckBox)
-from PyQt5.QtGui import QFont, QKeyEvent, QFocusEvent
+                             QSpinBox, QLineEdit, QTextEdit, QVBoxLayout, QGridLayout, QCheckBox, QMessageBox,
+                             QSizePolicy)
+from PyQt5.QtGui import QFont, QFontMetrics, QKeyEvent, QFocusEvent
 from PyQt5.QtCore import Qt
 import mnemonic
-from pathlib import Path
 import random
 import sys
+import traceback
 
 # This prevents IDE from creating a cache file
 sys.dont_write_bytecode = True
+
+
+def excepthook(exception_type, exception_value, exception_traceback):
+    """
+        Report an unhandled error instead of letting it escape a slot
+
+        PyQt5 calls qFatal(), which aborts the process, whenever a Python exception
+         propagates out of a signal handler. Installing a hook of our own keeps the
+         window alive and tells the user what went wrong rather than vanishing on them.
+    """
+    traceback.print_exception(exception_type, exception_value, exception_traceback)
+    if QApplication.instance() is not None:
+        QMessageBox.critical(None, "Formosa", "Something went wrong:\n\n%s: %s"
+                             % (exception_type.__name__, exception_value))
 
 
 class BaseTab(QWidget):
@@ -36,7 +51,9 @@ class BaseTab(QWidget):
     @property
     def is_bip39_theme(self) -> bool:
         """ Evaluates whether the theme chosen is from BIP39 or not"""
-        is_bip39 = self.base_theme.startswith(self.parent.DEFAULT_THEME)
+        # Read from the parent, which every tab shares, so a theme picked in another tab
+        #  is never answered from a copy left behind on this one
+        is_bip39 = self.parent.base_theme.startswith(self.parent.DEFAULT_THEME)
         return is_bip39
 
     def set_layout(self):
@@ -174,6 +191,26 @@ class MnemonicGeneratorTab(BaseTab):
         self.select_phrases.setValue(default_value)
         self.select_phrases.setWrapping(True)
 
+    def selected_phrases(self) -> int:
+        """
+            The amount of phrases to generate, snapped to a value the theme can encode
+
+            The spin box only steps in valid amounts, but a typed value is not snapped by Qt,
+             and a BIP39 word count which is not a multiple of 3 has no matching entropy size
+
+        Returns
+        -------
+        int
+            The amount of phrases which the current theme is able to generate
+        """
+        phrase_size = self.select_phrases.value()
+        if self.is_bip39_theme:
+            # Every 3 BIP39 words encode 32 bits of entropy, so partial groups cannot be built
+            phrase_size = max(3, phrase_size - phrase_size % 3)
+        if phrase_size != self.select_phrases.value():
+            self.select_phrases.setValue(phrase_size)
+        return phrase_size
+
     def enable_checkboxes(self, enable: bool = True):
         """
             Enable or disable the password checkboxes all together
@@ -190,7 +227,7 @@ class MnemonicGeneratorTab(BaseTab):
     def generate_text(self):
         """ Call generate_format which build a mnemonic phrase in Formosa standard then updates displayed text"""
         self.save_msg.hide()
-        phrase_size = self.select_phrases.value()
+        phrase_size = self.selected_phrases()
         strength = 32*phrase_size//3 if self.is_bip39_theme else 32 * phrase_size
         words = self.parent.base_mnemonic.generate(strength)
         text = self.parent.base_mnemonic.format_mnemonic(words)+"\n"
@@ -220,7 +257,9 @@ class MnemonicGeneratorTab(BaseTab):
 
     def copy_to_clipboard(self):
         """ Copy the generated phrases to clipboard"""
-        app.clipboard = self.last_text
+        # Assigning to QApplication.clipboard replaces the method with a string,
+        #  which silently copies nothing and breaks every later clipboard user
+        QApplication.clipboard().setText(self.last_text)
 
     def recover_text(self):
         """ Recover an edited text in the text box to its former self in the Mnemonic Generator tab"""
@@ -295,6 +334,9 @@ class MnemonicGeneratorTab(BaseTab):
         """
         lines = self.last_text.splitlines(False)
         for line_index in self.password_lines:
+            if not 0 <= line_index < len(lines):
+                # The bookkeeping drifted, most likely because the text box was edited by hand
+                continue
             password_line = lines[line_index]
             character_index = [remove.index(each_char) for each_char in list(password_line) if each_char in remove]
             changed_character = [each_char for each_char in list(password_line) if each_char in insert]
@@ -389,6 +431,14 @@ class ThemeConverterTab(BaseTab):
 
 class TableSelectorTab(BaseTab):
     COLUMN_LINE_PARAGRAPH_SIZE = 8
+    # The table is never scrolled, so the writing is what gives way when room runs short
+    SMALLEST_GRID_FONT = 4
+    LARGEST_GRID_FONT = 14
+    # Writing smaller than this to keep a long word whole is a bad bargain, the words of
+    #  a list are already told apart by their first two letters
+    COMFORTABLE_GRID_FONT = 7
+    PREFERRED_WORD_LETTERS = 10
+    MINIMUM_WORD_LETTERS = 6
 
     class QHighlightCheckBox(QCheckBox):
         def __init__(self, parent: 'TableSelectorTab'):
@@ -473,6 +523,11 @@ class TableSelectorTab(BaseTab):
         self.custom_character_entry = self.QKeysLineEdit(self)
         self.output_button = QPushButton(self)
         self.grid_frame_selector = QGridLayout()
+        self.grid_holder = QWidget(self)
+        self.grid_holder.setLayout(self.grid_frame_selector)
+        # The font size and word length the grid was last fitted with
+        self.grid_fit = ()
+        self.panel_max_width = 0
         self.panel_widgets = [self.reset_button, self.sel_valid_phrase_label,
                               self.highlight_checkbox, self.warning_label,
                               self.use_custom_set, self.custom_character_entry, self.output_button]
@@ -480,8 +535,34 @@ class TableSelectorTab(BaseTab):
 
         self.define_key_list()
 
+    def current_words(self) -> list:
+        """
+            The labels of the syntactic word the grid is showing
+
+            The theme can be changed from any tab, so the word being shown is checked
+             against the theme in force and the selection restarts when it went stale,
+             which used to raise KeyError as soon as the grid was touched again
+
+        Returns
+        -------
+        list
+            The labels currently held for the syntactic word being selected
+        """
+        natural_order = self.parent.base_dict.natural_order
+        if self.natural_word not in natural_order:
+            self.natural_word = natural_order[0] if natural_order else ""
+            self.picked_passphrase = []
+        return self.object_dict.get(self.natural_word, [])
+
     def clear_grid(self):
         """ Clear grid variables and widgets"""
+        # Every label built for the previous grid is dropped, not only the ones which
+        #  reached the layout, otherwise the cells left out of it pile up as hidden
+        #  children of the tab on each of the many rebuilds a session goes through
+        previous_labels = (self.column_objects + self.line_objects + self.paragraph_objects
+                           + [each_label for each_list in self.object_dict.values()
+                              for each_label in each_list])
+
         self.column_objects = []
         self.line_objects = []
         self.paragraph_objects = []
@@ -491,8 +572,10 @@ class TableSelectorTab(BaseTab):
          for each_word in self.parent.base_dict.natural_order]
 
         for i in reversed(range(self.grid_frame_selector.count())):
-            self.grid_frame_selector.itemAt(i).widget().deleteLater()
-            self.grid_frame_selector.itemAt(i).widget().setParent(None)
+            self.grid_frame_selector.takeAt(i)
+        for each_label in previous_labels:
+            each_label.setParent(None)
+            each_label.deleteLater()
 
     def config_tab(self):
         """ Set up widgets, config texts, commands and variables"""
@@ -516,17 +599,183 @@ class TableSelectorTab(BaseTab):
 
     def set_tab_layout(self):
         """ Place the widgets in the window tab"""
-        max_width = max(self.parent.width()//3, 1)
-        # Set max width to each widget
-        [each_widget.setMaximumWidth(max_width) for each_widget in self.panel_widgets]
         # Position each widget to next row
         [self.tab_layout.addWidget(each_widget, self.panel_widgets.index(each_widget), 0)
          for each_widget in self.panel_widgets]
 
-        self.grid_frame_selector.setAlignment(Qt.AlignTop)
-        self.tab_layout.addLayout(self.grid_frame_selector, 0, 2,
-                                  self.COLUMN_LINE_PARAGRAPH_SIZE * self.COLUMN_LINE_PARAGRAPH_SIZE,
-                                  self.COLUMN_LINE_PARAGRAPH_SIZE + 2)
+        # The whole table has to be read without scrolling: a shoulder surfer who sees
+        #  the user scroll learns which band of the table the word sits in, which is
+        #  exactly what the shuffled column, line and paragraph keys are there to hide
+        self.grid_frame_selector.setSpacing(1)
+        self.grid_frame_selector.setContentsMargins(0, 0, 0, 0)
+        self.grid_holder.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Ignored)
+        # Spanning the rows of the panel, not one row per grid cell, otherwise the spacing
+        #  of the empty rows alone sets a minimum height taller than the screen
+        spare_row = len(self.panel_widgets)
+        self.tab_layout.addWidget(self.grid_holder, 0, 2, spare_row + 1, 1)
+        # The panel keeps its buttons at their own height at the top of the column,
+        #  and the empty row below it takes the height left over
+        self.tab_layout.setRowStretch(spare_row, 1)
+        # The panel keeps its width and the grid takes whatever room is left
+        self.tab_layout.setColumnStretch(0, 0)
+        self.tab_layout.setColumnStretch(2, 1)
+        self.update_panel_width()
+
+    def update_panel_width(self):
+        """ Keep the panel to a third of the window, following it as it is resized"""
+        max_width = max(self.parent.width()//3, 1)
+        if max_width == self.panel_max_width:
+            # Setting it again would lay out the tab once more and call this back
+            return
+        self.panel_max_width = max_width
+        [each_widget.setMaximumWidth(max_width) for each_widget in self.panel_widgets]
+
+    def resizeEvent(self, event):
+        """ Follow the window size, as the panel width and the grid are a share of it"""
+        super().resizeEvent(event)
+        # The base class lays the tab out while this one is still being built,
+        #  so the panel is only measured once its widgets are in place
+        if getattr(self, "panel_widgets", None):
+            self.update_panel_width()
+            self.fit_grid_to_view()
+
+    def displayed_paragraphs(self, words_amount: int) -> int:
+        """
+            How many paragraphs of the grid the words of a syntactic word reach
+
+        Parameters
+        ----------
+        words_amount : int
+            The amount of words to be shown in the grid
+
+        Returns
+        -------
+        int
+            The amount of paragraphs needed, never more than the grid holds
+        """
+        a = self.COLUMN_LINE_PARAGRAPH_SIZE
+        paragraph_size = a * a
+        # Rounded up, so a list which fills its paragraphs exactly does not open an empty one
+        paragraphs = (max(words_amount, 1) + paragraph_size - 1) // paragraph_size
+        return min(a, paragraphs)
+
+    def fit_grid_to_view(self):
+        """
+            Size the words of the grid so the whole table is read in a single view
+
+            The table must never scroll, so instead of the view following the words,
+             the words are fitted to the view: the font is taken down until every row
+             fits the height available and every word is cut to the width of its column
+        """
+        current_objects = self.current_words()
+        if not current_objects or self.is_bip39_theme:
+            return
+        a = self.COLUMN_LINE_PARAGRAPH_SIZE
+        total_words = self.parent.base_dict[self.natural_word].total_words
+        # A header row of column keys, then one row per line of every paragraph shown
+        rows = 1 + self.displayed_paragraphs(len(current_objects)) * a
+        # The word columns, the paragraph key column and the line key column
+        columns = a + 2
+        spacing = self.grid_frame_selector.spacing()
+        # Measured after the layout is settled, otherwise the size read here is the one
+        #  the grid had before the theme, the window or the panel last changed
+        self.layout().activate()
+        available = self.grid_holder.size()
+        row_height = (available.height() - spacing * rows) // rows
+        usable_width = available.width() - spacing * columns
+        if row_height < 1 or usable_width < 1:
+            return
+
+        longest_word = max((len(each_word) for each_word in total_words[:len(current_objects)]), default=1)
+        font_size, letters = self.grid_writing(row_height, usable_width, longest_word)
+        if (self.natural_word, font_size, letters) == self.grid_fit:
+            # Writing the same thing again would lay the tab out once more and call this back
+            return
+        self.grid_fit = (self.natural_word, font_size, letters)
+
+        grid_font = QFont("Times", font_size)
+        metrics = QFontMetrics(grid_font)
+        for each_object in self.column_objects + self.line_objects + self.paragraph_objects:
+            each_object.setFont(grid_font)
+        for cell_index, each_object in enumerate(current_objects):
+            each_object.setFont(grid_font)
+            if cell_index < len(total_words):
+                # Cut against the room the cell was actually given, rather than against
+                #  a guess at it, so no word is left clipped in the middle of a letter
+                each_object.setText(
+                    self._get_text(total_words, cell_index, metrics, each_object.width()))
+
+    def grid_writing(self, row_height: int, usable_width: int, longest_word: int) -> tuple:
+        """
+            The writing which shows the most of the table within the room it is given
+
+            Keeping every word whole is preferred, but only while the writing stays
+             comfortable to read. A single long word is not allowed to shrink the whole
+             table, since the words of a list are told apart by their first two letters
+
+        Parameters
+        ----------
+        row_height : int
+            The height available to a single row of the grid
+        usable_width : int
+            The width available to a whole row of the grid
+        longest_word : int
+            The length of the longest word which has to be shown
+
+        Returns
+        -------
+        tuple
+            The point size to write the grid with and how many letters of a word it shows
+        """
+        a = self.COLUMN_LINE_PARAGRAPH_SIZE
+        smallest = None
+        recognisable = None
+        good_part = None
+        whole_words = None
+        for each_size in range(self.SMALLEST_GRID_FONT, self.LARGEST_GRID_FONT + 1):
+            metrics = QFontMetrics(QFont("Times", each_size))
+            if metrics.height() > row_height:
+                break
+            # The paragraph and the line key columns hold a single character each
+            word_column = (usable_width - 2 * metrics.horizontalAdvance("W")) // a
+            letters = self.fitting_word_length(metrics, word_column)
+            if smallest is None:
+                smallest = (each_size, letters)
+            if letters >= self.MINIMUM_WORD_LETTERS:
+                recognisable = (each_size, letters)
+            if letters >= self.PREFERRED_WORD_LETTERS:
+                good_part = (each_size, letters)
+            if letters >= longest_word:
+                whole_words = (each_size, letters)
+        # Whole words in comfortable writing, else the largest writing showing a good
+        #  part of the word, else the largest one showing enough of it to be recognised
+        if whole_words is not None and whole_words[0] >= self.COMFORTABLE_GRID_FONT:
+            return whole_words
+        if good_part is not None and good_part[0] >= self.COMFORTABLE_GRID_FONT:
+            return good_part
+        return recognisable or good_part or whole_words or smallest or (self.SMALLEST_GRID_FONT, 1)
+
+    @staticmethod
+    def fitting_word_length(metrics: QFontMetrics, column_width: int) -> int:
+        """
+            How many letters of a word fit a column, once the keys prefixing it are placed
+
+        Parameters
+        ----------
+        metrics : QFontMetrics
+            The measurements of the font the grid is written with
+        column_width : int
+            The width available to a single word column of the grid
+
+        Returns
+        -------
+        int
+            The amount of letters of the word which fit the column
+        """
+        # The three keys and the hyphen are always shown, they are what is typed
+        prefix_width = metrics.horizontalAdvance("WWW-")
+        letter_width = max(metrics.horizontalAdvance("n"), 1)
+        return max(1, (column_width - prefix_width) // letter_width)
 
     def set_base_theme(self, theme_chosen):
         """
@@ -553,21 +802,6 @@ class TableSelectorTab(BaseTab):
         # Clear grid widgets
         self.clear_grid()
 
-        # Trim long words to limit the grid occupied space
-        limited_list = {}
-        row_len_limited = {}
-        for each_syntactic_word in syntactic_word_list:
-            limited_list.update({each_syntactic_word: []})
-            row_len_limited.update({each_syntactic_word: []})
-            returned_list, returned_bools = \
-                self.limit_word_length(words_dictionary[each_syntactic_word].total_words)
-            limited_list.update({each_syntactic_word: returned_list})
-            row_len_limited.update({each_syntactic_word: returned_bools})
-
-        font_sizes = {}
-        [font_sizes.update({each_syntactic_word: 7 if row_len_limited[each_syntactic_word] else 8})
-         for each_syntactic_word in syntactic_word_list]
-
         # Write the characters in column, line and paragraph indexes
         self.column_objects = [QLabel(parent=self, text=self.input_set_column[column])
                                for column in range(a)]
@@ -577,61 +811,33 @@ class TableSelectorTab(BaseTab):
         # Index line is get by repeating 0 'a' times to 'a', e.g. [0, 0, ..., 1, 1, ..., 7, 7]
         self.paragraph_objects = [QLabel(parent=self, text=self.input_set_paragraph[paragraph])
                                   for paragraph in range(a) for line in range(a)]
-        [(each_object.setFont(self.font), each_object.hide())
-         for each_object in self.column_objects + self.line_objects + self.paragraph_objects]
 
-        [[[[self.object_dict[each_syntactic_word].append(
-            QLabel(parent=self,
-                   text=self._get_text(limited_list[each_syntactic_word], column, line, paragraph)))
-            for column in range(a) if self._cell_idx(column, line, paragraph) < len(
-                words_dictionary[each_syntactic_word].total_words)]
-            for line in range(a)]
-            for paragraph in range(a)]
-            for each_syntactic_word in syntactic_word_list]
+        # The cell index counts the columns of a line, then the lines of a paragraph,
+        #  so a label lands at the same position in the list as its word in the theme
+        for each_syntactic_word in syntactic_word_list:
+            total_words = words_dictionary[each_syntactic_word].total_words
+            self.object_dict[each_syntactic_word] = [
+                QLabel(parent=self, text=self._get_text(total_words, cell_index))
+                for cell_index in range(min(len(total_words), a * a * a))]
 
-        [(each_object.setFont(QFont('Times', font_sizes[each_syntactic_word])), each_object.hide())
-         for each_syntactic_word in syntactic_word_list
-         for each_object in self.object_dict[each_syntactic_word]]
-
-    def limit_word_length(self, wordlist: list) -> (list, bool):
-        """
-            Limit the characters in words of the grid
-
-        Parameters
-        ----------
-        wordlist : list
-            This is the list containing the words used in the grid
-        Returns
-        -------
-        list, bool
-            Returns the list with the words used in the grid updated with limited length
-            Returns if the row is long and a smaller font should be used
-        """
-        a = self.COLUMN_LINE_PARAGRAPH_SIZE
-        char_len_limit = 12
-        row_len_limited = False
-        row_chars = ""
-
-        limited_list = [each_word[0:char_len_limit-3]+"..."
-                        if len(each_word) > char_len_limit else each_word
-                        for each_word in wordlist]
-
-        row_len_limited = True if any([
-            len("".join(wordlist[a*each_row_index:(a+1)*each_row_index])) > a*char_len_limit
-            for each_row_index in range(len(wordlist)//a)]
-        ) else row_len_limited
-
-        for each_row_index in range(len(wordlist)//a):
-            row_chars += "".join(wordlist[a*each_row_index:(a+1)*each_row_index])
-            row_len_limited = True if len(row_chars) > a*char_len_limit else row_len_limited
-
-        return limited_list, row_len_limited
+        for each_object in (self.column_objects + self.line_objects + self.paragraph_objects
+                            + [each_label for each_list in self.object_dict.values()
+                               for each_label in each_list]):
+            each_object.setFont(self.font)
+            # The grid takes the room the window leaves it and the words are fitted into
+            #  it, rather than the labels asking for room and pushing the window outwards
+            each_object.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Ignored)
+            each_object.setMinimumSize(0, 0)
+            each_object.hide()
 
     def new_grid(self):
         """ Call the sequence to create and show a new words grid in the Table Selector tab"""
         self.randomize_character_set()
         self.init_label_objects()
         self.allocate_grid()
+        # The labels are new, so the last fit says nothing about them
+        self.grid_fit = ()
+        self.fit_grid_to_view()
 
     def enable_custom_keys_set(self):
         """ Enable the use of custom keys in the Table Selector tab"""
@@ -680,7 +886,8 @@ class TableSelectorTab(BaseTab):
         self.permutation_map.update({self.states[2]: self.input_set_paragraph})
         self.permutation_map.update({self.states[3]: self.input_set_line})
 
-    def _get_text(self, word_list: list[str], column: int, line: int, paragraph: int):
+    def _get_text(self, word_list: list[str], cell_index: int,
+                  metrics: QFontMetrics = None, cell_width: int = 0):
         """
             Build up the string to be displayed in the word Label
 
@@ -688,23 +895,30 @@ class TableSelectorTab(BaseTab):
         ----------
         word_list : list[str]
             The total words of the current displayed grid
-        column : int
-            Index of column
-        line : int
-            Index of line
-        paragraph : int
-            Index of paragraph
+        cell_index : int
+            Index of the cell in the grid, which is the index of its word in the list
+        metrics : QFontMetrics
+            The measurements of the font the grid is written with
+        cell_width : int
+            The room the whole cell has, the word is written whole when it is zero
 
         Returns
         -------
             The string ready to be displayed
         """
-        column_index = str(self.input_set_column[column])
-        line_index = str(self.input_set_line[line])
-        paragraph_index = str(self.input_set_paragraph[paragraph])
-        word = str(word_list[self._cell_idx(column, line, paragraph)])
-        label_text = column_index + paragraph_index + line_index + "-" + word
-        return label_text
+        a = self.COLUMN_LINE_PARAGRAPH_SIZE
+        column_index = str(self.input_set_column[cell_index % a])
+        line_index = str(self.input_set_line[(cell_index // a) % a])
+        paragraph_index = str(self.input_set_paragraph[cell_index // (a * a)])
+        # The three keys and the hyphen are always shown, they are what is typed
+        keys = column_index + paragraph_index + line_index + "-"
+        word = str(word_list[cell_index])
+        if metrics is not None and cell_width > 0:
+            # Elided by Qt, which marks the cut so a trimmed word is never
+            #  mistaken for a whole one and never spills over its column
+            word = metrics.elidedText(word, Qt.ElideRight,
+                                      cell_width - metrics.horizontalAdvance(keys))
+        return keys + word
 
     def _cell_idx(self, column: int, line: int, paragraph: int):
         """
@@ -757,15 +971,11 @@ class TableSelectorTab(BaseTab):
             # The grid does not support BIP39 theme, as the "phrase" is one word long and the total words doesn't fit
             return
 
-        current_objects = self.object_dict[self.natural_word]
+        current_objects = self.current_words()
         a = self.COLUMN_LINE_PARAGRAPH_SIZE
-        # The floor division to determine paragraph limit
-        b = max([1, len(current_objects)//(a*a)])
 
         # Add aligned widgets to the grid and reveal them
-        for paragraph in range(a):
-            if paragraph > b:
-                break
+        for paragraph in range(self.displayed_paragraphs(len(current_objects))):
             for line in range(a):
                 line_widget = self.line_objects[self._line_idx(line, paragraph)]
                 paragraph_widget = self.paragraph_objects[self._line_idx(line, paragraph)]
@@ -801,6 +1011,9 @@ class TableSelectorTab(BaseTab):
             It is the key pressed
         """
         redo_set_keys = [Qt.Key_Escape, Qt.Key_Backspace, Qt.Key_Delete]
+        if self.is_bip39_theme:
+            # The grid does not support BIP39, so there is nothing on screen to select from
+            return
         if event.text() in self.input_set_caseless and self.current_state != self.states[-1]:
 
             self.current_state = self.states[self.states.index(self.current_state) + 1]
@@ -871,7 +1084,7 @@ class TableSelectorTab(BaseTab):
                 phrase = " ".join(self.picked_passphrase[phrase_len * i:phrase_len * (i + 1)])
                 output_phrases += phrase + " "
                 print(phrase)
-            app.clipboard().setText(output_phrases)
+            QApplication.clipboard().setText(output_phrases)
 
     def check_word_list(self, word=None):
         """
@@ -888,8 +1101,7 @@ class TableSelectorTab(BaseTab):
         """
         checklist = self.picked_passphrase.copy()
         if word is not None:
-            # Slice the string to get the word after the hyphen
-            checklist.append(word[word.find("-") + 1:])
+            checklist.append(word)
         state = True
         themed_dict = self.parent.base_dict
         natural_order = themed_dict.natural_order
@@ -908,10 +1120,18 @@ class TableSelectorTab(BaseTab):
             if not all(value in natural_order[:check_size] for value in filling_order[:check_size]):
                 continue
             led_by = themed_dict[filling_order_word].led_by
-            led_by_word = checklist[natural_order.index(led_by) + phrases_shift]
-            natural_index = themed_dict.natural_index(filling_order_word)
-            word_mapping = themed_dict[led_by][filling_order_word].mapping[led_by_word]
-            state = False if checklist[natural_index + phrases_shift] not in word_mapping else state
+            # A theme where every word stands on its own, such as "nationalities",
+            #  leads its words by "NONE" and has no restriction left to check
+            if led_by not in natural_order:
+                continue
+            led_by_index = natural_order.index(led_by) + phrases_shift
+            natural_index = themed_dict.natural_index(filling_order_word) + phrases_shift
+            if max(led_by_index, natural_index) >= len(checklist):
+                continue
+            word_mapping = themed_dict[led_by][filling_order_word].mapping
+            led_by_word = checklist[led_by_index]
+            # A leading word outside the mapping already makes the phrase incompatible
+            state = False if checklist[natural_index] not in word_mapping.get(led_by_word, []) else state
 
         self.set_validation_colored_msg(state)
 
@@ -954,7 +1174,7 @@ class TableSelectorTab(BaseTab):
         index : int
             This is the index of column, or paragraph or line selected which will highlighted
         """
-        current_objects = self.object_dict[self.natural_word]
+        current_objects = self.current_words()
         a = self.COLUMN_LINE_PARAGRAPH_SIZE
         index = index % a
         begin = index
@@ -980,8 +1200,11 @@ class TableSelectorTab(BaseTab):
             line = self.selected_indexes[self.states[2]]
             begin = column + a * index + (a * a) * line
             end = begin
-            if end + 1 < len(self.object_dict[self.natural_word]):
-                self.check_word_list(self.object_dict[self.natural_word][begin:end + 1][0].text())
+            # The labels are built in cell index order, so they line up with the total words,
+            #  which must be read from the theme because the labels show trimmed words
+            total_words = self.parent.base_dict[self.natural_word].total_words
+            if begin < min(len(current_objects), len(total_words)):
+                self.check_word_list(total_words[begin])
         color = self.defaultbg if self.current_state == self.states[0] else self.check_color
         self.fill_bg_color(color, begin, end, step)
 
@@ -1000,9 +1223,8 @@ class TableSelectorTab(BaseTab):
         step : int
             This is the step which maps the selected serialized objects to a grid layout
         """
-        current_objects = self.object_dict[self.natural_word]
+        current_objects = self.current_words()
         if self.highlight_checkbox.isChecked():
-            current_objects = self.object_dict[self.natural_word]
             [each_label.setStyleSheet("background-color: " + color)
              for each_label in current_objects[begin:end + 1:step]]
             [each_label.setStyleSheet(self.defaultbg) for each_label in current_objects
@@ -1015,11 +1237,13 @@ class TableSelectorTab(BaseTab):
     def pick_word(self):
         """ Store the selection when a word is selected in the Table Selector tab"""
         a = self.COLUMN_LINE_PARAGRAPH_SIZE
+        # Asked first so the word being selected is checked against the theme in force
+        self.current_words()
         column = self.selected_indexes[self.states[1]]
         line = self.selected_indexes[self.states[2]]
         paragraph = self.selected_indexes[self.states[3]]
         word_index = self._cell_idx(column, paragraph, line)
-        words_list = self.parent.base_dict[self.natural_word]["TOTAL_LIST"]
+        words_list = self.parent.base_dict[self.natural_word].total_words
         self.current_state = self.states[0]
         char_index = 0
         if word_index < len(words_list):
@@ -1053,15 +1277,24 @@ class QtFormosa(QMainWindow):
     def __init__(self, parent=None):
         super(QtFormosa, self).__init__(parent)
         self.setWindowTitle("Formosa Application")
-        self.setGeometry(0, 0, 1024, 600)
+        # Opening at a fixed size puts the lower buttons under the edge of a smaller
+        #  screen, so the preferred size is kept within the room the screen gives
+        preferred_width, preferred_height = 1024, 600
+        available = QApplication.primaryScreen().availableGeometry() \
+            if QApplication.primaryScreen() is not None else None
+        if available is not None:
+            preferred_width = min(preferred_width, available.width())
+            preferred_height = min(preferred_height, available.height())
+        self.resize(preferred_width, preferred_height)
 
         self.themes = self.sorted_themes()
-        self.base_theme = self.DEFAULT_THEME
+        self.base_theme = self.themes[0]
+        # Reading and parsing a theme file costs milliseconds and the grid asks for it
+        #  on every keystroke, so each theme is built once and kept
+        self._mnemonic_cache = {}
 
         self.table_widget = FeaturesTabs(self)
         self.setCentralWidget(self.table_widget)
-
-        self.show()
 
     def sorted_themes(self) -> tuple[str]:
         """
@@ -1074,13 +1307,14 @@ class QtFormosa(QMainWindow):
         tuple[str]
             Return a tuple of themes, the first element is the default theme and rest is sorted
         """
-        directory_path = (Path(__file__).parent.absolute() / "themes")
-        files_path = Path(directory_path)
-        themes = sorted([each_directory.stem for each_directory in files_path.glob(r"*.json")])
-        default_index = themes.index(self.DEFAULT_THEME)
-        default_theme = themes.pop(default_index)
-        sorted_themes = tuple([default_theme]) + tuple(themes[:default_index] + themes[default_index:])
-        return sorted_themes
+        themes = list(mnemonic.Mnemonic.find_themes())
+        if not themes:
+            raise mnemonic.ThemeNotFound("No theme .json file was found in %s"
+                                         % mnemonic.Mnemonic.themes_directory())
+        if self.DEFAULT_THEME in themes:
+            themes.remove(self.DEFAULT_THEME)
+            themes.insert(0, self.DEFAULT_THEME)
+        return tuple(themes)
 
     def set_base_theme(self, theme_chosen: str):
         """
@@ -1096,8 +1330,9 @@ class QtFormosa(QMainWindow):
     @property
     def base_mnemonic(self) -> mnemonic.Mnemonic:
         """ Return the base Mnemonic object"""
-        base_mnemonic = mnemonic.Mnemonic(self.base_theme)
-        return base_mnemonic
+        if self.base_theme not in self._mnemonic_cache:
+            self._mnemonic_cache[self.base_theme] = mnemonic.Mnemonic(self.base_theme)
+        return self._mnemonic_cache[self.base_theme]
 
     @property
     def base_dict(self) -> mnemonic.ThemeDict:
@@ -1141,6 +1376,15 @@ class FeaturesTabs(QWidget):
         self.tab_control.currentWidget().set_base_theme(base_theme)
 
 
-app = QApplication(sys.argv)
-ex = QtFormosa()
-sys.exit(app.exec_())
+def main() -> int:
+    """ Start the Formosa application"""
+    # Installed before any widget exists so no error can abort the process unreported
+    sys.excepthook = excepthook
+    app = QApplication(sys.argv)
+    window = QtFormosa()
+    window.show()
+    return app.exec_()
+
+
+if __name__ == "__main__":
+    sys.exit(main())
