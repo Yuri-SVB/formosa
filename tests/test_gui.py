@@ -152,6 +152,75 @@ class GuiTest(unittest.TestCase):
         self.selector.output_phrases()
         self.assertIn(self.selector.natural_word, self.window.base_dict.natural_order)
 
+    # The smallest screen the window is expected to sit inside
+    SMALL_SCREEN = (800, 600)
+
+    def named_widgets(self, tab_index: int) -> list:
+        """ The controls of a tab which the user is meant to be able to reach"""
+        names = {
+            0: ("run_button clip_button select_phrases check_case check_char check_number "
+                "redo_button clear_button save_button text_box select_base_theme quit_button"),
+            1: "base_mnemonic_box new_mnemonic_box convert_button select_new_theme select_base_theme quit_button",
+            2: ("reset_button sel_valid_phrase_label highlight_checkbox warning_label use_custom_set "
+                "custom_character_entry output_button grid_scroll_area select_base_theme quit_button"),
+        }[tab_index].split()
+        tab = self.tabs.tab_control.widget(tab_index)
+        return [(name, getattr(tab, name)) for name in names if hasattr(tab, name)]
+
+    def test_window_fits_a_small_screen(self) -> None:
+        """
+            The Table Selector spanned its grid over 64 layout rows, and the spacing of
+            those rows alone demanded more height than a small screen holds. The window
+            could not shrink below it, so maximizing left the lower controls off screen
+        """
+        for index in range(3):
+            self.tabs.tab_clicked(index)
+        minimum = self.window.minimumSizeHint()
+        self.assertLessEqual(minimum.width(), self.SMALL_SCREEN[0])
+        self.assertLessEqual(minimum.height(), self.SMALL_SCREEN[1])
+
+    def test_every_control_stays_inside_the_window(self) -> None:
+        """ No control may sit past the window edge, at any size, theme or tab"""
+        for size in (self.SMALL_SCREEN, (1024, 768), (1920, 1080)):
+            self.window.resize(*size)
+            for theme in ("BIP39", "medieval_fantasy", "nationalities"):
+                for index in range(3):
+                    self.tabs.tab_clicked(index)
+                    self.tabs.tab_control.widget(index).set_base_theme(theme)
+                    self.application.processEvents()
+                    for name, widget in self.named_widgets(index):
+                        if not widget.isVisibleTo(self.window):
+                            continue
+                        corner = widget.mapTo(self.window, widget.rect().bottomRight())
+                        with self.subTest(size=size, theme=theme, tab=index, widget=name):
+                            self.assertLessEqual(corner.x(), self.window.width())
+                            self.assertLessEqual(corner.y(), self.window.height())
+
+    def test_words_grid_scrolls_instead_of_growing_the_window(self) -> None:
+        """ A theme with more words than the screen shows must scroll, not resize the window"""
+        self.tabs.tab_clicked(2)
+        self.selector.set_base_theme("medieval_fantasy")
+        self.window.resize(*self.SMALL_SCREEN)
+        self.application.processEvents()
+        self.assertLessEqual(self.selector.grid_scroll_area.height(), self.window.height())
+        self.assertTrue(self.selector.grid_scroll_area.widgetResizable())
+
+    def test_grid_labels_are_not_piled_up(self) -> None:
+        """ Rebuilding the grid used to leave behind the labels which never reached the layout"""
+        from PyQt5.QtWidgets import QLabel
+        self.tabs.tab_clicked(2)
+        self.selector.set_base_theme("medieval_fantasy")
+
+        def label_amount() -> int:
+            self.application.processEvents()
+            return (len(self.selector.findChildren(QLabel))
+                    + len(self.selector.grid_holder.findChildren(QLabel)))
+
+        after_first_grid = label_amount()
+        for _ in range(6):
+            self.selector.new_grid()
+        self.assertEqual(after_first_grid, label_amount())
+
     def test_converter_reports_bad_input_without_raising(self) -> None:
         """ Whatever is typed in the converter has to end up as a message, never as a crash"""
         self.tabs.tab_clicked(1)

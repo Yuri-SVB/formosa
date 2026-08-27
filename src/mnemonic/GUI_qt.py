@@ -1,5 +1,6 @@
 from PyQt5.QtWidgets import (QMainWindow, QApplication, QWidget, QTabWidget, QLabel, QPushButton, QComboBox,
-                             QSpinBox, QLineEdit, QTextEdit, QVBoxLayout, QGridLayout, QCheckBox, QMessageBox)
+                             QSpinBox, QLineEdit, QTextEdit, QVBoxLayout, QGridLayout, QCheckBox, QMessageBox,
+                             QScrollArea)
 from PyQt5.QtGui import QFont, QKeyEvent, QFocusEvent
 from PyQt5.QtCore import Qt
 import mnemonic
@@ -514,6 +515,10 @@ class TableSelectorTab(BaseTab):
         self.custom_character_entry = self.QKeysLineEdit(self)
         self.output_button = QPushButton(self)
         self.grid_frame_selector = QGridLayout()
+        self.grid_holder = QWidget(self)
+        self.grid_holder.setLayout(self.grid_frame_selector)
+        self.grid_scroll_area = QScrollArea(self)
+        self.panel_max_width = 0
         self.panel_widgets = [self.reset_button, self.sel_valid_phrase_label,
                               self.highlight_checkbox, self.warning_label,
                               self.use_custom_set, self.custom_character_entry, self.output_button]
@@ -542,6 +547,13 @@ class TableSelectorTab(BaseTab):
 
     def clear_grid(self):
         """ Clear grid variables and widgets"""
+        # Every label built for the previous grid is dropped, not only the ones which
+        #  reached the layout, otherwise the cells left out of it pile up as hidden
+        #  children of the tab on each of the many rebuilds a session goes through
+        previous_labels = (self.column_objects + self.line_objects + self.paragraph_objects
+                           + [each_label for each_list in self.object_dict.values()
+                              for each_label in each_list])
+
         self.column_objects = []
         self.line_objects = []
         self.paragraph_objects = []
@@ -551,11 +563,10 @@ class TableSelectorTab(BaseTab):
          for each_word in self.parent.base_dict.natural_order]
 
         for i in reversed(range(self.grid_frame_selector.count())):
-            grid_item = self.grid_frame_selector.takeAt(i)
-            grid_widget = grid_item.widget() if grid_item is not None else None
-            if grid_widget is not None:
-                grid_widget.setParent(None)
-                grid_widget.deleteLater()
+            self.grid_frame_selector.takeAt(i)
+        for each_label in previous_labels:
+            each_label.setParent(None)
+            each_label.deleteLater()
 
     def config_tab(self):
         """ Set up widgets, config texts, commands and variables"""
@@ -579,17 +590,44 @@ class TableSelectorTab(BaseTab):
 
     def set_tab_layout(self):
         """ Place the widgets in the window tab"""
-        max_width = max(self.parent.width()//3, 1)
-        # Set max width to each widget
-        [each_widget.setMaximumWidth(max_width) for each_widget in self.panel_widgets]
         # Position each widget to next row
         [self.tab_layout.addWidget(each_widget, self.panel_widgets.index(each_widget), 0)
          for each_widget in self.panel_widgets]
 
         self.grid_frame_selector.setAlignment(Qt.AlignTop)
-        self.tab_layout.addLayout(self.grid_frame_selector, 0, 2,
-                                  self.COLUMN_LINE_PARAGRAPH_SIZE * self.COLUMN_LINE_PARAGRAPH_SIZE,
-                                  self.COLUMN_LINE_PARAGRAPH_SIZE + 2)
+        # The words grid is as tall and as wide as the theme needs, which is more than a
+        #  screen holds, so it scrolls inside its own area instead of pushing the window
+        #  past the screen edge and taking the Exit button along with it
+        self.grid_scroll_area.setWidget(self.grid_holder)
+        self.grid_scroll_area.setWidgetResizable(True)
+        # Spanning the rows of the panel, not one row per grid cell, otherwise the spacing
+        #  of the empty rows alone sets a minimum height taller than the screen
+        spare_row = len(self.panel_widgets)
+        self.tab_layout.addWidget(self.grid_scroll_area, 0, 2, spare_row + 1, 1)
+        # The panel keeps its buttons at their own height at the top of the column,
+        #  and the empty row below it takes the height left over
+        self.tab_layout.setRowStretch(spare_row, 1)
+        # The panel keeps its width and the grid takes whatever room is left
+        self.tab_layout.setColumnStretch(0, 0)
+        self.tab_layout.setColumnStretch(2, 1)
+        self.update_panel_width()
+
+    def update_panel_width(self):
+        """ Keep the panel to a third of the window, following it as it is resized"""
+        max_width = max(self.parent.width()//3, 1)
+        if max_width == self.panel_max_width:
+            # Setting it again would lay out the tab once more and call this back
+            return
+        self.panel_max_width = max_width
+        [each_widget.setMaximumWidth(max_width) for each_widget in self.panel_widgets]
+
+    def resizeEvent(self, event):
+        """ Follow the window size, as the panel width is a share of it"""
+        super().resizeEvent(event)
+        # The base class lays the tab out while this one is still being built,
+        #  so the panel is only measured once its widgets are in place
+        if getattr(self, "panel_widgets", None):
+            self.update_panel_width()
 
     def set_base_theme(self, theme_chosen):
         """
@@ -1126,7 +1164,15 @@ class QtFormosa(QMainWindow):
     def __init__(self, parent=None):
         super(QtFormosa, self).__init__(parent)
         self.setWindowTitle("Formosa Application")
-        self.setGeometry(0, 0, 1024, 600)
+        # Opening at a fixed size puts the lower buttons under the edge of a smaller
+        #  screen, so the preferred size is kept within the room the screen gives
+        preferred_width, preferred_height = 1024, 600
+        available = QApplication.primaryScreen().availableGeometry() \
+            if QApplication.primaryScreen() is not None else None
+        if available is not None:
+            preferred_width = min(preferred_width, available.width())
+            preferred_height = min(preferred_height, available.height())
+        self.resize(preferred_width, preferred_height)
 
         self.themes = self.sorted_themes()
         self.base_theme = self.themes[0]
