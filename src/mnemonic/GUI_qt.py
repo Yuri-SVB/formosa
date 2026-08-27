@@ -1,14 +1,28 @@
 from PyQt5.QtWidgets import (QMainWindow, QApplication, QWidget, QTabWidget, QLabel, QPushButton, QComboBox,
-                             QSpinBox, QLineEdit, QTextEdit, QVBoxLayout, QGridLayout, QCheckBox)
+                             QSpinBox, QLineEdit, QTextEdit, QVBoxLayout, QGridLayout, QCheckBox, QMessageBox)
 from PyQt5.QtGui import QFont, QKeyEvent, QFocusEvent
 from PyQt5.QtCore import Qt
 import mnemonic
-from pathlib import Path
 import random
 import sys
+import traceback
 
 # This prevents IDE from creating a cache file
 sys.dont_write_bytecode = True
+
+
+def excepthook(exception_type, exception_value, exception_traceback):
+    """
+        Report an unhandled error instead of letting it escape a slot
+
+        PyQt5 calls qFatal(), which aborts the process, whenever a Python exception
+         propagates out of a signal handler. Installing a hook of our own keeps the
+         window alive and tells the user what went wrong rather than vanishing on them.
+    """
+    traceback.print_exception(exception_type, exception_value, exception_traceback)
+    if QApplication.instance() is not None:
+        QMessageBox.critical(None, "Formosa", "Something went wrong:\n\n%s: %s"
+                             % (exception_type.__name__, exception_value))
 
 
 class BaseTab(QWidget):
@@ -36,7 +50,9 @@ class BaseTab(QWidget):
     @property
     def is_bip39_theme(self) -> bool:
         """ Evaluates whether the theme chosen is from BIP39 or not"""
-        is_bip39 = self.base_theme.startswith(self.parent.DEFAULT_THEME)
+        # Read from the parent, which every tab shares, so a theme picked in another tab
+        #  is never answered from a copy left behind on this one
+        is_bip39 = self.parent.base_theme.startswith(self.parent.DEFAULT_THEME)
         return is_bip39
 
     def set_layout(self):
@@ -174,6 +190,26 @@ class MnemonicGeneratorTab(BaseTab):
         self.select_phrases.setValue(default_value)
         self.select_phrases.setWrapping(True)
 
+    def selected_phrases(self) -> int:
+        """
+            The amount of phrases to generate, snapped to a value the theme can encode
+
+            The spin box only steps in valid amounts, but a typed value is not snapped by Qt,
+             and a BIP39 word count which is not a multiple of 3 has no matching entropy size
+
+        Returns
+        -------
+        int
+            The amount of phrases which the current theme is able to generate
+        """
+        phrase_size = self.select_phrases.value()
+        if self.is_bip39_theme:
+            # Every 3 BIP39 words encode 32 bits of entropy, so partial groups cannot be built
+            phrase_size = max(3, phrase_size - phrase_size % 3)
+        if phrase_size != self.select_phrases.value():
+            self.select_phrases.setValue(phrase_size)
+        return phrase_size
+
     def enable_checkboxes(self, enable: bool = True):
         """
             Enable or disable the password checkboxes all together
@@ -190,7 +226,7 @@ class MnemonicGeneratorTab(BaseTab):
     def generate_text(self):
         """ Call generate_format which build a mnemonic phrase in Formosa standard then updates displayed text"""
         self.save_msg.hide()
-        phrase_size = self.select_phrases.value()
+        phrase_size = self.selected_phrases()
         strength = 32*phrase_size//3 if self.is_bip39_theme else 32 * phrase_size
         words = self.parent.base_mnemonic.generate(strength)
         text = self.parent.base_mnemonic.format_mnemonic(words)+"\n"
@@ -220,7 +256,9 @@ class MnemonicGeneratorTab(BaseTab):
 
     def copy_to_clipboard(self):
         """ Copy the generated phrases to clipboard"""
-        app.clipboard = self.last_text
+        # Assigning to QApplication.clipboard replaces the method with a string,
+        #  which silently copies nothing and breaks every later clipboard user
+        QApplication.clipboard().setText(self.last_text)
 
     def recover_text(self):
         """ Recover an edited text in the text box to its former self in the Mnemonic Generator tab"""
@@ -295,6 +333,9 @@ class MnemonicGeneratorTab(BaseTab):
         """
         lines = self.last_text.splitlines(False)
         for line_index in self.password_lines:
+            if not 0 <= line_index < len(lines):
+                # The bookkeeping drifted, most likely because the text box was edited by hand
+                continue
             password_line = lines[line_index]
             character_index = [remove.index(each_char) for each_char in list(password_line) if each_char in remove]
             changed_character = [each_char for each_char in list(password_line) if each_char in insert]
@@ -480,6 +521,25 @@ class TableSelectorTab(BaseTab):
 
         self.define_key_list()
 
+    def current_words(self) -> list:
+        """
+            The labels of the syntactic word the grid is showing
+
+            The theme can be changed from any tab, so the word being shown is checked
+             against the theme in force and the selection restarts when it went stale,
+             which used to raise KeyError as soon as the grid was touched again
+
+        Returns
+        -------
+        list
+            The labels currently held for the syntactic word being selected
+        """
+        natural_order = self.parent.base_dict.natural_order
+        if self.natural_word not in natural_order:
+            self.natural_word = natural_order[0] if natural_order else ""
+            self.picked_passphrase = []
+        return self.object_dict.get(self.natural_word, [])
+
     def clear_grid(self):
         """ Clear grid variables and widgets"""
         self.column_objects = []
@@ -491,8 +551,11 @@ class TableSelectorTab(BaseTab):
          for each_word in self.parent.base_dict.natural_order]
 
         for i in reversed(range(self.grid_frame_selector.count())):
-            self.grid_frame_selector.itemAt(i).widget().deleteLater()
-            self.grid_frame_selector.itemAt(i).widget().setParent(None)
+            grid_item = self.grid_frame_selector.takeAt(i)
+            grid_widget = grid_item.widget() if grid_item is not None else None
+            if grid_widget is not None:
+                grid_widget.setParent(None)
+                grid_widget.deleteLater()
 
     def config_tab(self):
         """ Set up widgets, config texts, commands and variables"""
@@ -609,21 +672,17 @@ class TableSelectorTab(BaseTab):
         """
         a = self.COLUMN_LINE_PARAGRAPH_SIZE
         char_len_limit = 12
-        row_len_limited = False
-        row_chars = ""
 
         limited_list = [each_word[0:char_len_limit-3]+"..."
                         if len(each_word) > char_len_limit else each_word
                         for each_word in wordlist]
 
-        row_len_limited = True if any([
-            len("".join(wordlist[a*each_row_index:(a+1)*each_row_index])) > a*char_len_limit
-            for each_row_index in range(len(wordlist)//a)]
-        ) else row_len_limited
-
-        for each_row_index in range(len(wordlist)//a):
-            row_chars += "".join(wordlist[a*each_row_index:(a+1)*each_row_index])
-            row_len_limited = True if len(row_chars) > a*char_len_limit else row_len_limited
+        # A row spans "a" words, so it goes from a*index to a*(index + 1),
+        #  and each row is measured on its own instead of accumulating over the whole list
+        row_len_limited = any(
+            len("".join(wordlist[a*each_row_index:a*(each_row_index+1)])) > a*char_len_limit
+            for each_row_index in range(len(wordlist)//a)
+        )
 
         return limited_list, row_len_limited
 
@@ -757,7 +816,7 @@ class TableSelectorTab(BaseTab):
             # The grid does not support BIP39 theme, as the "phrase" is one word long and the total words doesn't fit
             return
 
-        current_objects = self.object_dict[self.natural_word]
+        current_objects = self.current_words()
         a = self.COLUMN_LINE_PARAGRAPH_SIZE
         # The floor division to determine paragraph limit
         b = max([1, len(current_objects)//(a*a)])
@@ -801,6 +860,9 @@ class TableSelectorTab(BaseTab):
             It is the key pressed
         """
         redo_set_keys = [Qt.Key_Escape, Qt.Key_Backspace, Qt.Key_Delete]
+        if self.is_bip39_theme:
+            # The grid does not support BIP39, so there is nothing on screen to select from
+            return
         if event.text() in self.input_set_caseless and self.current_state != self.states[-1]:
 
             self.current_state = self.states[self.states.index(self.current_state) + 1]
@@ -871,7 +933,7 @@ class TableSelectorTab(BaseTab):
                 phrase = " ".join(self.picked_passphrase[phrase_len * i:phrase_len * (i + 1)])
                 output_phrases += phrase + " "
                 print(phrase)
-            app.clipboard().setText(output_phrases)
+            QApplication.clipboard().setText(output_phrases)
 
     def check_word_list(self, word=None):
         """
@@ -888,8 +950,7 @@ class TableSelectorTab(BaseTab):
         """
         checklist = self.picked_passphrase.copy()
         if word is not None:
-            # Slice the string to get the word after the hyphen
-            checklist.append(word[word.find("-") + 1:])
+            checklist.append(word)
         state = True
         themed_dict = self.parent.base_dict
         natural_order = themed_dict.natural_order
@@ -908,10 +969,18 @@ class TableSelectorTab(BaseTab):
             if not all(value in natural_order[:check_size] for value in filling_order[:check_size]):
                 continue
             led_by = themed_dict[filling_order_word].led_by
-            led_by_word = checklist[natural_order.index(led_by) + phrases_shift]
-            natural_index = themed_dict.natural_index(filling_order_word)
-            word_mapping = themed_dict[led_by][filling_order_word].mapping[led_by_word]
-            state = False if checklist[natural_index + phrases_shift] not in word_mapping else state
+            # A theme where every word stands on its own, such as "nationalities",
+            #  leads its words by "NONE" and has no restriction left to check
+            if led_by not in natural_order:
+                continue
+            led_by_index = natural_order.index(led_by) + phrases_shift
+            natural_index = themed_dict.natural_index(filling_order_word) + phrases_shift
+            if max(led_by_index, natural_index) >= len(checklist):
+                continue
+            word_mapping = themed_dict[led_by][filling_order_word].mapping
+            led_by_word = checklist[led_by_index]
+            # A leading word outside the mapping already makes the phrase incompatible
+            state = False if checklist[natural_index] not in word_mapping.get(led_by_word, []) else state
 
         self.set_validation_colored_msg(state)
 
@@ -954,7 +1023,7 @@ class TableSelectorTab(BaseTab):
         index : int
             This is the index of column, or paragraph or line selected which will highlighted
         """
-        current_objects = self.object_dict[self.natural_word]
+        current_objects = self.current_words()
         a = self.COLUMN_LINE_PARAGRAPH_SIZE
         index = index % a
         begin = index
@@ -980,8 +1049,11 @@ class TableSelectorTab(BaseTab):
             line = self.selected_indexes[self.states[2]]
             begin = column + a * index + (a * a) * line
             end = begin
-            if end + 1 < len(self.object_dict[self.natural_word]):
-                self.check_word_list(self.object_dict[self.natural_word][begin:end + 1][0].text())
+            # The labels are built in cell index order, so they line up with the total words,
+            #  which must be read from the theme because the labels show trimmed words
+            total_words = self.parent.base_dict[self.natural_word].total_words
+            if begin < min(len(current_objects), len(total_words)):
+                self.check_word_list(total_words[begin])
         color = self.defaultbg if self.current_state == self.states[0] else self.check_color
         self.fill_bg_color(color, begin, end, step)
 
@@ -1000,9 +1072,8 @@ class TableSelectorTab(BaseTab):
         step : int
             This is the step which maps the selected serialized objects to a grid layout
         """
-        current_objects = self.object_dict[self.natural_word]
+        current_objects = self.current_words()
         if self.highlight_checkbox.isChecked():
-            current_objects = self.object_dict[self.natural_word]
             [each_label.setStyleSheet("background-color: " + color)
              for each_label in current_objects[begin:end + 1:step]]
             [each_label.setStyleSheet(self.defaultbg) for each_label in current_objects
@@ -1015,11 +1086,13 @@ class TableSelectorTab(BaseTab):
     def pick_word(self):
         """ Store the selection when a word is selected in the Table Selector tab"""
         a = self.COLUMN_LINE_PARAGRAPH_SIZE
+        # Asked first so the word being selected is checked against the theme in force
+        self.current_words()
         column = self.selected_indexes[self.states[1]]
         line = self.selected_indexes[self.states[2]]
         paragraph = self.selected_indexes[self.states[3]]
         word_index = self._cell_idx(column, paragraph, line)
-        words_list = self.parent.base_dict[self.natural_word]["TOTAL_LIST"]
+        words_list = self.parent.base_dict[self.natural_word].total_words
         self.current_state = self.states[0]
         char_index = 0
         if word_index < len(words_list):
@@ -1056,12 +1129,13 @@ class QtFormosa(QMainWindow):
         self.setGeometry(0, 0, 1024, 600)
 
         self.themes = self.sorted_themes()
-        self.base_theme = self.DEFAULT_THEME
+        self.base_theme = self.themes[0]
+        # Reading and parsing a theme file costs milliseconds and the grid asks for it
+        #  on every keystroke, so each theme is built once and kept
+        self._mnemonic_cache = {}
 
         self.table_widget = FeaturesTabs(self)
         self.setCentralWidget(self.table_widget)
-
-        self.show()
 
     def sorted_themes(self) -> tuple[str]:
         """
@@ -1074,13 +1148,14 @@ class QtFormosa(QMainWindow):
         tuple[str]
             Return a tuple of themes, the first element is the default theme and rest is sorted
         """
-        directory_path = (Path(__file__).parent.absolute() / "themes")
-        files_path = Path(directory_path)
-        themes = sorted([each_directory.stem for each_directory in files_path.glob(r"*.json")])
-        default_index = themes.index(self.DEFAULT_THEME)
-        default_theme = themes.pop(default_index)
-        sorted_themes = tuple([default_theme]) + tuple(themes[:default_index] + themes[default_index:])
-        return sorted_themes
+        themes = list(mnemonic.Mnemonic.find_themes())
+        if not themes:
+            raise mnemonic.ThemeNotFound("No theme .json file was found in %s"
+                                         % mnemonic.Mnemonic.themes_directory())
+        if self.DEFAULT_THEME in themes:
+            themes.remove(self.DEFAULT_THEME)
+            themes.insert(0, self.DEFAULT_THEME)
+        return tuple(themes)
 
     def set_base_theme(self, theme_chosen: str):
         """
@@ -1096,8 +1171,9 @@ class QtFormosa(QMainWindow):
     @property
     def base_mnemonic(self) -> mnemonic.Mnemonic:
         """ Return the base Mnemonic object"""
-        base_mnemonic = mnemonic.Mnemonic(self.base_theme)
-        return base_mnemonic
+        if self.base_theme not in self._mnemonic_cache:
+            self._mnemonic_cache[self.base_theme] = mnemonic.Mnemonic(self.base_theme)
+        return self._mnemonic_cache[self.base_theme]
 
     @property
     def base_dict(self) -> mnemonic.ThemeDict:
@@ -1141,6 +1217,15 @@ class FeaturesTabs(QWidget):
         self.tab_control.currentWidget().set_base_theme(base_theme)
 
 
-app = QApplication(sys.argv)
-ex = QtFormosa()
-sys.exit(app.exec_())
+def main() -> int:
+    """ Start the Formosa application"""
+    # Installed before any widget exists so no error can abort the process unreported
+    sys.excepthook = excepthook
+    app = QApplication(sys.argv)
+    window = QtFormosa()
+    window.show()
+    return app.exec_()
+
+
+if __name__ == "__main__":
+    sys.exit(main())

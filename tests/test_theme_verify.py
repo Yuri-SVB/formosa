@@ -54,6 +54,9 @@ class Verifier:
             self.check_filling_sequence()
             self.check_restriction_sequence()
             self.check_total_words()
+            # A theme whose words lead no other word, such as "nationalities", has no
+            #  restriction at all, so the checks below have to run outside the loop as well
+            self.check_space_char_total_words()
 
             for current_restriction in self.current_dict.leads:
                 self.current_restriction = current_restriction
@@ -63,6 +66,7 @@ class Verifier:
                 self.check_enough_sublists()
                 self.check_mapping_consistence()
                 self.check_space_char_general()
+                self.check_general_unicity()
 
         self.validated = True
 
@@ -176,15 +180,28 @@ class Verifier:
             error_message = "A word from %s dictionary is not found in list of total words in %s."
             raise VerificationFailed(error_message % (self.current_word, self.current_restriction))
 
+    def check_space_char_total_words(self):
+        """
+            Check if there is any space character in the list of Total Words
+
+            A mnemonic is split on spaces, so a word holding one can never be read back
+        """
+        if " " in "".join(self.current_dict.total_words):
+            error_message = "Space character found in %s"
+            raise VerificationFailed(error_message % self.current_word.lower())
+
     def check_space_char_general(self):
         """ Check if there is any space character in the general lists Total Words, Mapping keys and Image words"""
-        space_in_total_words = " " in "".join(self.current_dict.total_words)
+        self.check_space_char_total_words()
         space_in_images = " " in "".join(self.current_dict[self.current_restriction].image)
         space_in_keys = " " in "".join(self.current_dict[self.current_restriction].mapping.keys())
 
-        if space_in_total_words or space_in_images or space_in_keys:
+        if space_in_images or space_in_keys:
             error_message = "Space character found in %s"
             raise VerificationFailed(error_message % self.current_word.lower())
+
+        for mapping_key in self.led_words.mapping.keys():
+            self._check_space_char_specific(mapping_key)
 
     def _check_space_char_specific(self, mapping_key: list[str]):
         """
@@ -225,7 +242,7 @@ class Verifier:
         # Concatenate the first n letters of each word in a set
         # If the word in BIP39 has 3 letters finish with "-"
         n = 4 if self.is_bip39 else 2
-        unique_list = set([w[:n] if len(w) >= n else w+"-" for w in sublist])
+        unique_list = set([Mnemonic.first_letters(w, n) for w in sublist])
         if len(unique_list) != len(sublist) and len(sublist):
             error_message = "The list of %s in the %s has no unicity."
             raise VerificationFailed(

@@ -38,7 +38,10 @@ class ConfigurationError(Exception):
 
 
 class ThemeAmbiguous(Exception):
-    pass
+    def __init__(self, message: str = "", themes: Union[list[str], None] = None):
+        super().__init__(message)
+        # The candidate themes which the mnemonic could belong to
+        self.themes = list(themes) if themes else []
 
 
 class ThemeNotFound(Exception):
@@ -351,7 +354,7 @@ class ThemeDict(dict):
         sentence = self.normalize_mnemonic(sentence)
         if len(sentence) != self.words_per_phrase:
             error_message = "The number of words in sentence must be %d, but it is %d"
-            raise ValueError(error_message % (len(sentence), self.words_per_phrase))
+            raise ValueError(error_message % (self.words_per_phrase, len(sentence)))
 
         word_indexes = [0]*len(sentence)
         restriction_sequence = self.restriction_sequence
@@ -385,8 +388,8 @@ class ThemeDict(dict):
         """
         sentence = self.normalize_mnemonic(sentence)
         if len(sentence) % self.words_per_phrase != 0:
-            error_message = "The number of words in sentence must be %d, but it is %d"
-            raise ValueError(error_message % (len(sentence), self.words_per_phrase))
+            error_message = "The number of words in sentence must be a multiple of %d, but it is %d"
+            raise ValueError(error_message % (self.words_per_phrase, len(sentence)))
 
         word_natural_indexes = self.get_natural_indexes(sentence)
         word_fill_indexes = [word_natural_indexes[each_index]
@@ -568,6 +571,9 @@ def b58encode(v: bytes) -> str:
 
 class Mnemonic(object):
     DEFAULT_THEME = "BIP39"
+    THEMES_FOLDER = "themes"
+    # Word sets used by detect_theme, kept here so the theme files are read only once
+    _wordlists_cache: dict = {}
 
     @property
     def is_bip39_theme(self) -> bool:
@@ -577,7 +583,7 @@ class Mnemonic(object):
 
     def __init__(self, theme: str):
         self.base_theme = theme
-        theme_file = Path(__file__).parent.absolute() / Path("themes") / Path("%s.json" % theme)
+        theme_file = self.themes_directory() / Path("%s.json" % theme)
         if Path.exists(theme_file) and Path.is_file(theme_file):
             with open(theme_file) as json_file:
                 self.words_dictionary = ThemeDict(json.load(json_file))
@@ -588,6 +594,11 @@ class Mnemonic(object):
         self.delimiter = "\u3000" if theme == "BIP39_japanese" else " "
 
     @classmethod
+    def themes_directory(cls) -> Path:
+        """ The folder shipped with this module which holds the theme .json files"""
+        return Path(__file__).parent.absolute() / Path(cls.THEMES_FOLDER)
+
+    @classmethod
     def find_themes(cls) -> list[str]:
         """
             Look into the themes folder and list .json files as themes found
@@ -595,13 +606,31 @@ class Mnemonic(object):
         Returns
         -------
         list[str]
-            The list the name of the themes found in the folder
+            The sorted list of the name of the themes found in the folder
         """
-        themes_path = Path("themes")
-        theme_files = [str(each_file).split(".")[0]
-                       for each_file in os.listdir(Path(__file__).parent.absolute() / themes_path)
-                       if str(each_file).endswith(".json")]
+        # Path.stem keeps theme names which contain a dot intact, unlike splitting on "."
+        theme_files = sorted(each_file.stem
+                             for each_file in cls.themes_directory().glob("*.json"))
         return theme_files
+
+    @classmethod
+    def theme_wordlist(cls, theme: str) -> frozenset:
+        """
+            The set of every word of a theme, read from disk only the first time it is asked
+
+        Parameters
+        ----------
+        theme : str
+            The theme to get the words from
+
+        Returns
+        -------
+        frozenset
+            The set of all the words used by the given theme
+        """
+        if theme not in cls._wordlists_cache:
+            cls._wordlists_cache[theme] = frozenset(cls(theme).wordlist)
+        return cls._wordlists_cache[theme]
 
     @staticmethod
     def normalize_string(txt: Union[str, bytes]) -> str:
@@ -646,17 +675,74 @@ class Mnemonic(object):
         if isinstance(code, list):
             code = " ".join(code)
         code = cls.normalize_string(code)
-        possible_themes = set(cls(each_theme) for each_theme in cls.find_themes())
+        possible_themes = set(cls.find_themes())
         for word in code.split():
-            possible_themes = set(theme for theme in possible_themes if word in theme.wordlist)
+            possible_themes = set(theme for theme in possible_themes if word in cls.theme_wordlist(theme))
             if not possible_themes:
                 raise ThemeNotFound(f"Theme unrecognized for {word!r}")
         if len(possible_themes) == 1:
-            return possible_themes.pop().base_theme
+            return possible_themes.pop()
         else:
             raise ThemeAmbiguous(
-                f"Theme ambiguous between {', '.join( theme.base_theme for theme in possible_themes)}"
+                f"Theme ambiguous between {', '.join(sorted(possible_themes))}",
+                sorted(possible_themes),
             )
+
+    @classmethod
+    def resolve_theme(cls, code: Union[str, list[str]]) -> str:
+        """
+            Find which theme of a given complete mnemonic
+            Themes sharing every word of the mnemonic are told apart by their checksum,
+             as a mnemonic only checksums correctly under the theme which produced it
+
+        Parameters
+        ----------
+        code : Union[str, list[str]]
+            The complete mnemonic to find the theme of
+
+        Returns
+        -------
+        str
+            Unambiguous theme found
+
+        Raises
+        ------
+        ThemeNotFound
+            When no theme holds every word of the mnemonic
+        ThemeAmbiguous
+            When the checksum is unable to tell the candidate themes apart
+        """
+        try:
+            return cls.detect_theme(code)
+        except ThemeAmbiguous as ambiguity:
+            checked_themes = [each_theme for each_theme in ambiguity.themes
+                              if cls.checks_out(each_theme, code)]
+            if len(checked_themes) == 1:
+                return checked_themes[0]
+            raise
+
+    @classmethod
+    def checks_out(cls, theme: str, code: Union[str, list[str]]) -> bool:
+        """
+            Tell whether a mnemonic is valid in a given theme
+
+        Parameters
+        ----------
+        theme : str
+            The theme to read the mnemonic in
+        code : Union[str, list[str]]
+            The mnemonic to validate
+
+        Returns
+        -------
+        bool
+            Whether the mnemonic is complete and checksums correctly in the given theme
+        """
+        try:
+            return cls(theme).check(code)
+        except Exception:
+            # A word which the theme holds but never places in this position leaves it unreadable
+            return False
 
     def generate(self, strength: int = 128) -> str:
         """
@@ -676,12 +762,36 @@ class Mnemonic(object):
         str
             Words that encodes the generated entropy
         """
-        if strength % 32 != 0 and strength > 256:
+        if strength % 32 != 0 or not 32 <= strength <= 256:
             raise ValueError(
-                "Strength should be below 256 and a multiple of 32, but it is %d."
+                "Strength should be between 32 and 256 and a multiple of 32, but it is %d."
                 % strength
             )
         return self.to_mnemonic(os.urandom(strength // 8))
+
+    @staticmethod
+    def first_letters(word: str, letters_amount: int) -> str:
+        """
+            Take the first letters of a word as they are read and typed
+
+            The word is composed to the normal form NFC first, otherwise an accented letter
+             stored as a letter plus a combining mark counts as two, which both shortens the
+             password and makes different words share the same first letters
+
+        Parameters
+        ----------
+        word : str
+            The word to take the first letters from
+        letters_amount : int
+            The number of letters to take
+
+        Returns
+        -------
+        str
+            The first letters of the word, filled up with "-" when the word is shorter
+        """
+        word = unicodedata.normalize("NFC", word)
+        return word[:letters_amount] if len(word) >= letters_amount else word + "-"
 
     def format_mnemonic(self, mnemonic: Union[str, list[str]]) -> str:
         """
@@ -702,7 +812,7 @@ class Mnemonic(object):
         n = 4 if self.is_bip39_theme else 2
         # Concatenate the first n letters of each word in a single string
         # If the word in BIP39 has 3 letters finish with "-"
-        password = ["".join([w[:n] if len(w) >= n else w+"-" for w in mnemonic]) + "\n"]
+        password = ["".join([self.first_letters(w, n) for w in mnemonic]) + "\n"]
         phrase_size = self.words_dictionary.words_per_phrase
         password += [" ".join(mnemonic[phrase_size * phrase_index:phrase_size * (phrase_index + 1)]) + "\n"
                      for phrase_index in range(len(mnemonic) // phrase_size)]
@@ -870,7 +980,11 @@ class Mnemonic(object):
         if prefix in self.wordlist:
             return prefix
         else:
-            matches = [word for word in self.wordlist if word.startswith(prefix)]
+            # Compared in the composed form so an accented prefix matches its word,
+            #  no matter which normal form either of them was written in
+            composed_prefix = unicodedata.normalize("NFC", prefix)
+            matches = [word for word in self.wordlist
+                       if unicodedata.normalize("NFC", word).startswith(composed_prefix)]
             if len(matches) == 1:  # matched exactly one word in the wordlist
                 return matches[0]
             else:
@@ -912,7 +1026,8 @@ class Mnemonic(object):
                                                                                      for each_leads in
                                                                                      leading_sequence])):
                 word_index = words_dict.natural_index(syntactic_leads)
-                each_leads = each_phrase[words_dict.filling_order.index(syntactic_leads)]
+                # The phrase is held in natural order, so it is indexed by the natural index
+                each_leads = each_phrase[word_index]
                 self.wordlist = words_dict[syntactic_leads].total_words
                 expanded_phrase[word_index] = self.expand_word(each_leads)
 
@@ -938,21 +1053,47 @@ class Mnemonic(object):
             Note the whole phrase can be missed depending on the position of the missed word
         """
         n = 4 if self.is_bip39_theme else 2
+        password = unicodedata.normalize("NFC", password)
         if len(password) % n != 0:
             return password
+        # A word shorter than n letters is padded with "-" by format_mnemonic in every theme,
+        #  not only in BIP39, so the padding has to be dropped here for every theme as well
         password = " ".join([password[i:i+n-1]
-                             if password[i + n - 1] == "-" and self.is_bip39_theme else password[i:i+n]
+                             if password[i + n - 1] == "-" else password[i:i+n]
                              for i in range(0, len(password), n)])
         return self.expand(password)
 
     @classmethod
-    def to_seed(cls, mnemonic: str, passphrase: str = "") -> bytes:
+    def to_seed(cls, mnemonic: Union[str, list[str]], passphrase: str = "") -> bytes:
+        """
+            Derive the 64 bytes binary seed of a mnemonic
+
+            As required by the standard, a mnemonic of any Formosa theme is first converted back
+             to its equivalent BIP39 mnemonic, so the same entropy always yields the same seed,
+             keys and addresses no matter which theme was used to write it down
+
+        Parameters
+        ----------
+        mnemonic : Union[str, list[str]]
+            The mnemonic to derive the seed from
+        passphrase : str
+            The optional passphrase protecting the mnemonic
+
+        Returns
+        -------
+        bytes
+            The 64 bytes of the derived seed
+        """
+        if isinstance(mnemonic, list):
+            mnemonic = " ".join(mnemonic)
 
         try:
-            theme = cls.detect_theme(mnemonic)
-            if not cls.is_bip39_theme:
+            theme = cls.resolve_theme(mnemonic)
+            # cls.is_bip39_theme would evaluate the property object itself, which is always truthy
+            if not theme.startswith(cls.DEFAULT_THEME):
                 mnemonic = cls.convert_theme(mnemonic, cls.DEFAULT_THEME, theme)
         except ThemeNotFound:
+            # Words outside of every theme are hashed as given, as BIP39 does
             pass
 
         mnemonic = cls.normalize_string(mnemonic)
