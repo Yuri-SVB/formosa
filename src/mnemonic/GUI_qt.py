@@ -1,7 +1,7 @@
 from PyQt5.QtWidgets import (QMainWindow, QApplication, QWidget, QTabWidget, QLabel, QPushButton, QComboBox,
                              QSpinBox, QLineEdit, QTextEdit, QVBoxLayout, QGridLayout, QCheckBox, QMessageBox,
-                             QScrollArea)
-from PyQt5.QtGui import QFont, QKeyEvent, QFocusEvent
+                             QSizePolicy)
+from PyQt5.QtGui import QFont, QFontMetrics, QKeyEvent, QFocusEvent
 from PyQt5.QtCore import Qt
 import mnemonic
 import random
@@ -431,6 +431,14 @@ class ThemeConverterTab(BaseTab):
 
 class TableSelectorTab(BaseTab):
     COLUMN_LINE_PARAGRAPH_SIZE = 8
+    # The table is never scrolled, so the writing is what gives way when room runs short
+    SMALLEST_GRID_FONT = 4
+    LARGEST_GRID_FONT = 14
+    # Writing smaller than this to keep a long word whole is a bad bargain, the words of
+    #  a list are already told apart by their first two letters
+    COMFORTABLE_GRID_FONT = 7
+    PREFERRED_WORD_LETTERS = 10
+    MINIMUM_WORD_LETTERS = 6
 
     class QHighlightCheckBox(QCheckBox):
         def __init__(self, parent: 'TableSelectorTab'):
@@ -517,7 +525,8 @@ class TableSelectorTab(BaseTab):
         self.grid_frame_selector = QGridLayout()
         self.grid_holder = QWidget(self)
         self.grid_holder.setLayout(self.grid_frame_selector)
-        self.grid_scroll_area = QScrollArea(self)
+        # The font size and word length the grid was last fitted with
+        self.grid_fit = ()
         self.panel_max_width = 0
         self.panel_widgets = [self.reset_button, self.sel_valid_phrase_label,
                               self.highlight_checkbox, self.warning_label,
@@ -594,16 +603,16 @@ class TableSelectorTab(BaseTab):
         [self.tab_layout.addWidget(each_widget, self.panel_widgets.index(each_widget), 0)
          for each_widget in self.panel_widgets]
 
-        self.grid_frame_selector.setAlignment(Qt.AlignTop)
-        # The words grid is as tall and as wide as the theme needs, which is more than a
-        #  screen holds, so it scrolls inside its own area instead of pushing the window
-        #  past the screen edge and taking the Exit button along with it
-        self.grid_scroll_area.setWidget(self.grid_holder)
-        self.grid_scroll_area.setWidgetResizable(True)
+        # The whole table has to be read without scrolling: a shoulder surfer who sees
+        #  the user scroll learns which band of the table the word sits in, which is
+        #  exactly what the shuffled column, line and paragraph keys are there to hide
+        self.grid_frame_selector.setSpacing(1)
+        self.grid_frame_selector.setContentsMargins(0, 0, 0, 0)
+        self.grid_holder.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Ignored)
         # Spanning the rows of the panel, not one row per grid cell, otherwise the spacing
         #  of the empty rows alone sets a minimum height taller than the screen
         spare_row = len(self.panel_widgets)
-        self.tab_layout.addWidget(self.grid_scroll_area, 0, 2, spare_row + 1, 1)
+        self.tab_layout.addWidget(self.grid_holder, 0, 2, spare_row + 1, 1)
         # The panel keeps its buttons at their own height at the top of the column,
         #  and the empty row below it takes the height left over
         self.tab_layout.setRowStretch(spare_row, 1)
@@ -622,12 +631,151 @@ class TableSelectorTab(BaseTab):
         [each_widget.setMaximumWidth(max_width) for each_widget in self.panel_widgets]
 
     def resizeEvent(self, event):
-        """ Follow the window size, as the panel width is a share of it"""
+        """ Follow the window size, as the panel width and the grid are a share of it"""
         super().resizeEvent(event)
         # The base class lays the tab out while this one is still being built,
         #  so the panel is only measured once its widgets are in place
         if getattr(self, "panel_widgets", None):
             self.update_panel_width()
+            self.fit_grid_to_view()
+
+    def displayed_paragraphs(self, words_amount: int) -> int:
+        """
+            How many paragraphs of the grid the words of a syntactic word reach
+
+        Parameters
+        ----------
+        words_amount : int
+            The amount of words to be shown in the grid
+
+        Returns
+        -------
+        int
+            The amount of paragraphs needed, never more than the grid holds
+        """
+        a = self.COLUMN_LINE_PARAGRAPH_SIZE
+        paragraph_size = a * a
+        # Rounded up, so a list which fills its paragraphs exactly does not open an empty one
+        paragraphs = (max(words_amount, 1) + paragraph_size - 1) // paragraph_size
+        return min(a, paragraphs)
+
+    def fit_grid_to_view(self):
+        """
+            Size the words of the grid so the whole table is read in a single view
+
+            The table must never scroll, so instead of the view following the words,
+             the words are fitted to the view: the font is taken down until every row
+             fits the height available and every word is cut to the width of its column
+        """
+        current_objects = self.current_words()
+        if not current_objects or self.is_bip39_theme:
+            return
+        a = self.COLUMN_LINE_PARAGRAPH_SIZE
+        total_words = self.parent.base_dict[self.natural_word].total_words
+        # A header row of column keys, then one row per line of every paragraph shown
+        rows = 1 + self.displayed_paragraphs(len(current_objects)) * a
+        # The word columns, the paragraph key column and the line key column
+        columns = a + 2
+        spacing = self.grid_frame_selector.spacing()
+        # Measured after the layout is settled, otherwise the size read here is the one
+        #  the grid had before the theme, the window or the panel last changed
+        self.layout().activate()
+        available = self.grid_holder.size()
+        row_height = (available.height() - spacing * rows) // rows
+        usable_width = available.width() - spacing * columns
+        if row_height < 1 or usable_width < 1:
+            return
+
+        longest_word = max((len(each_word) for each_word in total_words[:len(current_objects)]), default=1)
+        font_size, letters = self.grid_writing(row_height, usable_width, longest_word)
+        if (self.natural_word, font_size, letters) == self.grid_fit:
+            # Writing the same thing again would lay the tab out once more and call this back
+            return
+        self.grid_fit = (self.natural_word, font_size, letters)
+
+        grid_font = QFont("Times", font_size)
+        metrics = QFontMetrics(grid_font)
+        for each_object in self.column_objects + self.line_objects + self.paragraph_objects:
+            each_object.setFont(grid_font)
+        for cell_index, each_object in enumerate(current_objects):
+            each_object.setFont(grid_font)
+            if cell_index < len(total_words):
+                # Cut against the room the cell was actually given, rather than against
+                #  a guess at it, so no word is left clipped in the middle of a letter
+                each_object.setText(
+                    self._get_text(total_words, cell_index, metrics, each_object.width()))
+
+    def grid_writing(self, row_height: int, usable_width: int, longest_word: int) -> tuple:
+        """
+            The writing which shows the most of the table within the room it is given
+
+            Keeping every word whole is preferred, but only while the writing stays
+             comfortable to read. A single long word is not allowed to shrink the whole
+             table, since the words of a list are told apart by their first two letters
+
+        Parameters
+        ----------
+        row_height : int
+            The height available to a single row of the grid
+        usable_width : int
+            The width available to a whole row of the grid
+        longest_word : int
+            The length of the longest word which has to be shown
+
+        Returns
+        -------
+        tuple
+            The point size to write the grid with and how many letters of a word it shows
+        """
+        a = self.COLUMN_LINE_PARAGRAPH_SIZE
+        smallest = None
+        recognisable = None
+        good_part = None
+        whole_words = None
+        for each_size in range(self.SMALLEST_GRID_FONT, self.LARGEST_GRID_FONT + 1):
+            metrics = QFontMetrics(QFont("Times", each_size))
+            if metrics.height() > row_height:
+                break
+            # The paragraph and the line key columns hold a single character each
+            word_column = (usable_width - 2 * metrics.horizontalAdvance("W")) // a
+            letters = self.fitting_word_length(metrics, word_column)
+            if smallest is None:
+                smallest = (each_size, letters)
+            if letters >= self.MINIMUM_WORD_LETTERS:
+                recognisable = (each_size, letters)
+            if letters >= self.PREFERRED_WORD_LETTERS:
+                good_part = (each_size, letters)
+            if letters >= longest_word:
+                whole_words = (each_size, letters)
+        # Whole words in comfortable writing, else the largest writing showing a good
+        #  part of the word, else the largest one showing enough of it to be recognised
+        if whole_words is not None and whole_words[0] >= self.COMFORTABLE_GRID_FONT:
+            return whole_words
+        if good_part is not None and good_part[0] >= self.COMFORTABLE_GRID_FONT:
+            return good_part
+        return recognisable or good_part or whole_words or smallest or (self.SMALLEST_GRID_FONT, 1)
+
+    @staticmethod
+    def fitting_word_length(metrics: QFontMetrics, column_width: int) -> int:
+        """
+            How many letters of a word fit a column, once the keys prefixing it are placed
+
+        Parameters
+        ----------
+        metrics : QFontMetrics
+            The measurements of the font the grid is written with
+        column_width : int
+            The width available to a single word column of the grid
+
+        Returns
+        -------
+        int
+            The amount of letters of the word which fit the column
+        """
+        # The three keys and the hyphen are always shown, they are what is typed
+        prefix_width = metrics.horizontalAdvance("WWW-")
+        letter_width = max(metrics.horizontalAdvance("n"), 1)
+        return max(1, (column_width - prefix_width) // letter_width)
 
     def set_base_theme(self, theme_chosen):
         """
@@ -654,21 +802,6 @@ class TableSelectorTab(BaseTab):
         # Clear grid widgets
         self.clear_grid()
 
-        # Trim long words to limit the grid occupied space
-        limited_list = {}
-        row_len_limited = {}
-        for each_syntactic_word in syntactic_word_list:
-            limited_list.update({each_syntactic_word: []})
-            row_len_limited.update({each_syntactic_word: []})
-            returned_list, returned_bools = \
-                self.limit_word_length(words_dictionary[each_syntactic_word].total_words)
-            limited_list.update({each_syntactic_word: returned_list})
-            row_len_limited.update({each_syntactic_word: returned_bools})
-
-        font_sizes = {}
-        [font_sizes.update({each_syntactic_word: 7 if row_len_limited[each_syntactic_word] else 8})
-         for each_syntactic_word in syntactic_word_list]
-
         # Write the characters in column, line and paragraph indexes
         self.column_objects = [QLabel(parent=self, text=self.input_set_column[column])
                                for column in range(a)]
@@ -678,57 +811,33 @@ class TableSelectorTab(BaseTab):
         # Index line is get by repeating 0 'a' times to 'a', e.g. [0, 0, ..., 1, 1, ..., 7, 7]
         self.paragraph_objects = [QLabel(parent=self, text=self.input_set_paragraph[paragraph])
                                   for paragraph in range(a) for line in range(a)]
-        [(each_object.setFont(self.font), each_object.hide())
-         for each_object in self.column_objects + self.line_objects + self.paragraph_objects]
 
-        [[[[self.object_dict[each_syntactic_word].append(
-            QLabel(parent=self,
-                   text=self._get_text(limited_list[each_syntactic_word], column, line, paragraph)))
-            for column in range(a) if self._cell_idx(column, line, paragraph) < len(
-                words_dictionary[each_syntactic_word].total_words)]
-            for line in range(a)]
-            for paragraph in range(a)]
-            for each_syntactic_word in syntactic_word_list]
+        # The cell index counts the columns of a line, then the lines of a paragraph,
+        #  so a label lands at the same position in the list as its word in the theme
+        for each_syntactic_word in syntactic_word_list:
+            total_words = words_dictionary[each_syntactic_word].total_words
+            self.object_dict[each_syntactic_word] = [
+                QLabel(parent=self, text=self._get_text(total_words, cell_index))
+                for cell_index in range(min(len(total_words), a * a * a))]
 
-        [(each_object.setFont(QFont('Times', font_sizes[each_syntactic_word])), each_object.hide())
-         for each_syntactic_word in syntactic_word_list
-         for each_object in self.object_dict[each_syntactic_word]]
-
-    def limit_word_length(self, wordlist: list) -> (list, bool):
-        """
-            Limit the characters in words of the grid
-
-        Parameters
-        ----------
-        wordlist : list
-            This is the list containing the words used in the grid
-        Returns
-        -------
-        list, bool
-            Returns the list with the words used in the grid updated with limited length
-            Returns if the row is long and a smaller font should be used
-        """
-        a = self.COLUMN_LINE_PARAGRAPH_SIZE
-        char_len_limit = 12
-
-        limited_list = [each_word[0:char_len_limit-3]+"..."
-                        if len(each_word) > char_len_limit else each_word
-                        for each_word in wordlist]
-
-        # A row spans "a" words, so it goes from a*index to a*(index + 1),
-        #  and each row is measured on its own instead of accumulating over the whole list
-        row_len_limited = any(
-            len("".join(wordlist[a*each_row_index:a*(each_row_index+1)])) > a*char_len_limit
-            for each_row_index in range(len(wordlist)//a)
-        )
-
-        return limited_list, row_len_limited
+        for each_object in (self.column_objects + self.line_objects + self.paragraph_objects
+                            + [each_label for each_list in self.object_dict.values()
+                               for each_label in each_list]):
+            each_object.setFont(self.font)
+            # The grid takes the room the window leaves it and the words are fitted into
+            #  it, rather than the labels asking for room and pushing the window outwards
+            each_object.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Ignored)
+            each_object.setMinimumSize(0, 0)
+            each_object.hide()
 
     def new_grid(self):
         """ Call the sequence to create and show a new words grid in the Table Selector tab"""
         self.randomize_character_set()
         self.init_label_objects()
         self.allocate_grid()
+        # The labels are new, so the last fit says nothing about them
+        self.grid_fit = ()
+        self.fit_grid_to_view()
 
     def enable_custom_keys_set(self):
         """ Enable the use of custom keys in the Table Selector tab"""
@@ -777,7 +886,8 @@ class TableSelectorTab(BaseTab):
         self.permutation_map.update({self.states[2]: self.input_set_paragraph})
         self.permutation_map.update({self.states[3]: self.input_set_line})
 
-    def _get_text(self, word_list: list[str], column: int, line: int, paragraph: int):
+    def _get_text(self, word_list: list[str], cell_index: int,
+                  metrics: QFontMetrics = None, cell_width: int = 0):
         """
             Build up the string to be displayed in the word Label
 
@@ -785,23 +895,30 @@ class TableSelectorTab(BaseTab):
         ----------
         word_list : list[str]
             The total words of the current displayed grid
-        column : int
-            Index of column
-        line : int
-            Index of line
-        paragraph : int
-            Index of paragraph
+        cell_index : int
+            Index of the cell in the grid, which is the index of its word in the list
+        metrics : QFontMetrics
+            The measurements of the font the grid is written with
+        cell_width : int
+            The room the whole cell has, the word is written whole when it is zero
 
         Returns
         -------
             The string ready to be displayed
         """
-        column_index = str(self.input_set_column[column])
-        line_index = str(self.input_set_line[line])
-        paragraph_index = str(self.input_set_paragraph[paragraph])
-        word = str(word_list[self._cell_idx(column, line, paragraph)])
-        label_text = column_index + paragraph_index + line_index + "-" + word
-        return label_text
+        a = self.COLUMN_LINE_PARAGRAPH_SIZE
+        column_index = str(self.input_set_column[cell_index % a])
+        line_index = str(self.input_set_line[(cell_index // a) % a])
+        paragraph_index = str(self.input_set_paragraph[cell_index // (a * a)])
+        # The three keys and the hyphen are always shown, they are what is typed
+        keys = column_index + paragraph_index + line_index + "-"
+        word = str(word_list[cell_index])
+        if metrics is not None and cell_width > 0:
+            # Elided by Qt, which marks the cut so a trimmed word is never
+            #  mistaken for a whole one and never spills over its column
+            word = metrics.elidedText(word, Qt.ElideRight,
+                                      cell_width - metrics.horizontalAdvance(keys))
+        return keys + word
 
     def _cell_idx(self, column: int, line: int, paragraph: int):
         """
@@ -856,13 +973,9 @@ class TableSelectorTab(BaseTab):
 
         current_objects = self.current_words()
         a = self.COLUMN_LINE_PARAGRAPH_SIZE
-        # The floor division to determine paragraph limit
-        b = max([1, len(current_objects)//(a*a)])
 
         # Add aligned widgets to the grid and reveal them
-        for paragraph in range(a):
-            if paragraph > b:
-                break
+        for paragraph in range(self.displayed_paragraphs(len(current_objects))):
             for line in range(a):
                 line_widget = self.line_objects[self._line_idx(line, paragraph)]
                 paragraph_widget = self.paragraph_objects[self._line_idx(line, paragraph)]

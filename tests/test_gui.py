@@ -52,6 +52,9 @@ class GuiTest(unittest.TestCase):
 
     def setUp(self) -> None:
         self.window = GUI_qt.QtFormosa()
+        # Shown as main() does it, otherwise the widgets are never given a geometry
+        #  and nothing about how they are placed can be measured
+        self.window.show()
         self.tabs = self.window.table_widget
         self.generator = self.tabs.mnemonic_generator
         self.converter = self.tabs.theme_converter
@@ -162,7 +165,7 @@ class GuiTest(unittest.TestCase):
                 "redo_button clear_button save_button text_box select_base_theme quit_button"),
             1: "base_mnemonic_box new_mnemonic_box convert_button select_new_theme select_base_theme quit_button",
             2: ("reset_button sel_valid_phrase_label highlight_checkbox warning_label use_custom_set "
-                "custom_character_entry output_button grid_scroll_area select_base_theme quit_button"),
+                "custom_character_entry output_button grid_holder select_base_theme quit_button"),
         }[tab_index].split()
         tab = self.tabs.tab_control.widget(tab_index)
         return [(name, getattr(tab, name)) for name in names if hasattr(tab, name)]
@@ -196,14 +199,33 @@ class GuiTest(unittest.TestCase):
                             self.assertLessEqual(corner.x(), self.window.width())
                             self.assertLessEqual(corner.y(), self.window.height())
 
-    def test_words_grid_scrolls_instead_of_growing_the_window(self) -> None:
-        """ A theme with more words than the screen shows must scroll, not resize the window"""
+    def test_whole_table_is_read_without_scrolling(self) -> None:
+        """
+            Scrolling would tell a shoulder surfer which band of the table the word is in,
+            which is what the shuffled column, line and paragraph keys are there to hide,
+            so every cell of every table has to sit inside the view at any window size
+        """
         self.tabs.tab_clicked(2)
-        self.selector.set_base_theme("medieval_fantasy")
-        self.window.resize(*self.SMALL_SCREEN)
-        self.application.processEvents()
-        self.assertLessEqual(self.selector.grid_scroll_area.height(), self.window.height())
-        self.assertTrue(self.selector.grid_scroll_area.widgetResizable())
+        for size in (self.SMALL_SCREEN, (1024, 768), (1920, 1080)):
+            self.window.resize(*size)
+            for theme in ("medieval_fantasy", "finances", "nationalities"):
+                self.selector.set_base_theme(theme)
+                for syntactic_word in self.window.base_dict.natural_order:
+                    self.selector.natural_word = syntactic_word
+                    self.selector.new_grid()
+                    self.application.processEvents()
+                    holder = self.selector.grid_holder
+                    labels = self.selector.current_words()
+                    with self.subTest(size=size, theme=theme, word=syntactic_word):
+                        self.assertTrue(labels)
+                        for cell_index, label in enumerate(labels):
+                            if not label.isVisibleTo(holder):
+                                continue
+                            corner = label.mapTo(holder, label.rect().bottomRight())
+                            self.assertLessEqual(corner.y(), holder.height(),
+                                                 f"cell {cell_index} falls below the table")
+                            self.assertLessEqual(corner.x(), holder.width(),
+                                                 f"cell {cell_index} falls past the table")
 
     def test_grid_labels_are_not_piled_up(self) -> None:
         """ Rebuilding the grid used to leave behind the labels which never reached the layout"""
