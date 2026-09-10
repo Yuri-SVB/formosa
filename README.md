@@ -193,6 +193,8 @@ At each sentence, each **clause syntactic element** is determined in a fixed ord
 
 For example, say the first chunk determines the verb and the second chunk determines the subject; if the first chunk maps to "to meow", the second chunk elicits another term from a sublist of subjects semantically fitting to this verb like felines or "cat people". Likewise, we could have a subject like "Snow White" determining a sublist of possible objects including "apple", "poison", "magic mirror", etc. Note that these sublists are pre-defined for each theme and **not** created during runtime.
 
+**⚡ Support:** [github.com/Yuri-SVB/SUPPORT](https://github.com/Yuri-SVB/SUPPORT) — free software, nothing gated.
+
 ## Credits
 
 This work has been brought to you by [Onyxcorp](https://onyxcorp.com/).
