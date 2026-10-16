@@ -999,6 +999,29 @@ class Mnemonic(object):
         if self.is_bip39_theme:
             return " ".join(map(self.expand_word, mnemonic))
         words_dict = self.words_dictionary
+        try:
+            return self._expand_sentences(words_dict, mnemonic)
+        finally:
+            # Restored however this returns: the search list is swapped about below,
+            #  and an error part way used to leave the object holding a partial one
+            self.wordlist = words_dict.wordlist
+
+    def _expand_sentences(self, words_dict: 'ThemeDict', mnemonic: list[str]) -> str:
+        """
+            Complete the words of a themed mnemonic, list by list
+
+        Parameters
+        ----------
+        words_dict : ThemeDict
+            The theme to complete the words from
+        mnemonic : list[str]
+            The words to be completed
+
+        Returns
+        -------
+        str
+            The mnemonic with each word completed as far as it is unambiguous
+        """
         phrase_size = words_dict.words_per_phrase
         sentences = words_dict.get_sentences(mnemonic)
         leading_sequence = words_dict.restriction_sequence
@@ -1032,9 +1055,7 @@ class Mnemonic(object):
                 expanded_phrase[word_index] = self.expand_word(each_leads)
 
             expanded_mnemonic += expanded_phrase
-        expanded_mnemonic = " ".join(expanded_mnemonic)
-        self.wordlist = words_dict.wordlist
-        return expanded_mnemonic
+        return " ".join(expanded_mnemonic)
 
     def expand_password(self, password: str) -> str:
         """

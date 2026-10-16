@@ -187,6 +187,23 @@ class FormosaRegressionTest(unittest.TestCase):
                     password = mnemo.format_mnemonic(code).splitlines()[0]
                     self.assertEqual(code, mnemo.expand_password(password))
 
+    def test_expand_leaves_no_partial_word_list_behind(self) -> None:
+        """
+            expand swaps the search list about as it works. An error part way used to
+            leave the object holding a partial one, and the window keeps objects in a
+            cache, so every later completion on it would search the wrong words
+        """
+        mnemo = Mnemonic("medieval_fantasy")
+        whole_list = list(mnemo.wordlist)
+
+        def explode(_prefix):
+            raise RuntimeError("failed part way through")
+
+        mnemo.expand_word = explode
+        with self.assertRaises(RuntimeError):
+            mnemo.expand(mnemo.generate(128))
+        self.assertEqual(whole_list, mnemo.wordlist)
+
     def test_words_hold_no_space(self) -> None:
         """ A word holding a space breaks a mnemonic, which is split on spaces"""
         for theme in Mnemonic.find_themes():

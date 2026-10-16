@@ -390,6 +390,174 @@ class GuiTest(unittest.TestCase):
         self.assertTrue(self.generator.last_text)
         self.assertLessEqual(self.generator.select_phrases.value(), 8)
 
+    def press_key(self, key_code: int, text: str = "") -> None:
+        """ Send a key release to the Table Selector, as the window would"""
+        self.selector.keyReleaseEvent(QKeyEvent(QEvent.KeyRelease, key_code, Qt.NoModifier, text))
+
+    def pick_first_cell(self) -> None:
+        """ Pick the opening cell of the grid by the keys written on it"""
+        for each_key in self.selector.current_words()[0].text().split("-")[0]:
+            self.press_key(ord(each_key.upper()), each_key)
+        self.press_key(Qt.Key_Return, "\r")
+
+    def test_backspace_gives_up_the_word_picked_last(self) -> None:
+        """ Backspace steps back through the words already picked"""
+        self.tabs.tab_clicked(2)
+        self.selector.set_base_theme("medieval_fantasy")
+        natural_order = self.window.base_dict.natural_order
+
+        for _ in range(3):
+            self.pick_first_cell()
+        self.assertEqual(3, len(self.selector.picked_passphrase))
+        picked_before = list(self.selector.picked_passphrase)
+
+        self.press_key(Qt.Key_Backspace)
+        self.assertEqual(picked_before[:2], self.selector.picked_passphrase)
+        # The grid goes back to the word the one given up was filling
+        self.assertEqual(natural_order[2], self.selector.natural_word)
+
+        self.press_key(Qt.Key_Backspace)
+        self.assertEqual(picked_before[:1], self.selector.picked_passphrase)
+        self.assertEqual(natural_order[1], self.selector.natural_word)
+
+    def test_backspace_takes_back_a_part_typed_selection_first(self) -> None:
+        """ A mistyped key costs one keystroke, not the word picked before it"""
+        self.tabs.tab_clicked(2)
+        self.selector.set_base_theme("medieval_fantasy")
+        self.pick_first_cell()
+        self.assertEqual(1, len(self.selector.picked_passphrase))
+
+        written_keys = self.selector.current_words()[0].text().split("-")[0]
+        self.press_key(ord(written_keys[0].upper()), written_keys[0])
+        self.assertNotEqual(self.selector.states[0], self.selector.current_state)
+
+        # First backspace clears the keys, leaving the picked word alone
+        self.press_key(Qt.Key_Backspace)
+        self.assertEqual(self.selector.states[0], self.selector.current_state)
+        self.assertEqual(1, len(self.selector.picked_passphrase))
+
+        # Only the second one gives up the word
+        self.press_key(Qt.Key_Backspace)
+        self.assertEqual([], self.selector.picked_passphrase)
+
+    def test_back_button_matches_the_backspace_key(self) -> None:
+        """ The button is the same action, for anyone not reaching for the keyboard"""
+        self.tabs.tab_clicked(2)
+        self.selector.set_base_theme("medieval_fantasy")
+        for _ in range(2):
+            self.pick_first_cell()
+        self.selector.back_button.click()
+        self.assertEqual(1, len(self.selector.picked_passphrase))
+        self.selector.back_button.click()
+        self.assertEqual([], self.selector.picked_passphrase)
+
+        # Going back past the start is harmless and frees the theme again
+        self.selector.back_button.click()
+        self.assertEqual([], self.selector.picked_passphrase)
+        self.assertEqual(self.window.base_dict.natural_order[0], self.selector.natural_word)
+        self.assertTrue(self.selector.select_base_theme.isEnabled())
+
+    def test_a_word_given_up_can_be_picked_again(self) -> None:
+        """ Going back and forward again lands on a phrase of the right length"""
+        self.tabs.tab_clicked(2)
+        self.selector.set_base_theme("nationalities")
+        phrase_length = len(self.window.base_dict.natural_order)
+        for _ in range(phrase_length):
+            self.pick_first_cell()
+        self.assertTrue(self.selector.output_button.isEnabled())
+
+        self.press_key(Qt.Key_Backspace)
+        self.assertFalse(self.selector.output_button.isEnabled())
+        self.pick_first_cell()
+        self.assertEqual(phrase_length, len(self.selector.picked_passphrase))
+        self.assertTrue(self.selector.output_button.isEnabled())
+
+    def test_generate_is_offered_only_for_a_whole_phrase(self) -> None:
+        """
+            Changing theme enabled the whole panel, which switched Generate Phrase on
+            with nothing picked at all
+        """
+        self.tabs.tab_clicked(2)
+        for theme in ("medieval_fantasy", "nationalities", "finances"):
+            with self.subTest(theme=theme):
+                self.selector.set_base_theme(theme)
+                self.assertEqual([], self.selector.picked_passphrase)
+                self.assertFalse(self.selector.output_button.isEnabled())
+                self.assertFalse(self.selector.back_button.isEnabled())
+
+    def test_words_are_not_carried_across_a_theme_change(self) -> None:
+        """ A phrase belongs to the theme whose lists it was picked from"""
+        self.tabs.tab_clicked(2)
+        self.selector.set_base_theme("medieval_fantasy")
+        self.pick_first_cell()
+        carried = list(self.selector.picked_passphrase)
+        self.assertTrue(carried)
+
+        self.selector.set_base_theme("nationalities")
+        self.assertEqual([], self.selector.picked_passphrase)
+        for each_word in carried:
+            self.assertNotIn(each_word, self.selector.picked_passphrase)
+
+    def test_grid_keys_come_from_an_unguessable_source(self) -> None:
+        """
+            The shuffle of the grid keys is the whole of what hides the chosen word
+            from an onlooker, and every permutation it draws is shown on screen. Drawn
+            from a Mersenne Twister, as it was, those permutations are a stream an
+            observer can use to recover the generator state and predict the next ones
+        """
+        import random as stdlib_random
+        self.assertIsInstance(GUI_qt.grid_random, stdlib_random.SystemRandom)
+        self.assertNotIn("import random", Path(GUI_qt.__file__).read_text(encoding="utf-8"))
+
+        # The keys really do move between grids
+        self.tabs.tab_clicked(2)
+        self.selector.set_base_theme("medieval_fantasy")
+        seen = set()
+        for _ in range(12):
+            self.selector.new_grid()
+            seen.add("".join(self.selector.input_set_column))
+        self.assertGreater(len(seen), 1)
+
+    def test_every_tab_is_ready_when_the_window_opens(self) -> None:
+        """
+            Only the first tab used to be set up when the window was built, so the
+            others opened blank, with unlabelled buttons and an empty theme list, and
+            filled themselves in at whatever moment they were first clicked
+        """
+        for index in range(self.tabs.tab_control.count()):
+            tab = self.tabs.tab_control.widget(index)
+            with self.subTest(tab=self.tabs.tab_control.tabText(index)):
+                self.assertFalse(tab.set_config, "tab was left to configure itself later")
+        self.assertEqual("Convert to theme", self.converter.convert_button.text())
+        self.assertEqual(len(self.window.themes), self.converter.select_new_theme.count())
+        self.assertEqual("Generate\nPhrase", self.selector.output_button.text())
+        self.assertTrue(self.selector.current_words())
+
+    def test_visiting_another_tab_keeps_the_phrase(self) -> None:
+        """
+            Every tab click calls set_base_theme with the theme already in force, so
+            clearing the phrase there threw away a phrase merely by looking at another
+            tab. Leaving it alone is not enough either: the grid used to be put back on
+            the opening word, so the next pick filled the wrong slot of the phrase
+        """
+        self.tabs.tab_clicked(2)
+        self.selector.set_base_theme("medieval_fantasy")
+        natural_order = self.window.base_dict.natural_order
+        for _ in range(2):
+            self.pick_first_cell()
+        picked = list(self.selector.picked_passphrase)
+        self.assertEqual(2, len(picked))
+
+        self.tabs.tab_clicked(0)
+        self.tabs.tab_clicked(2)
+        self.assertEqual(picked, self.selector.picked_passphrase)
+        # and the grid is still on the slot the phrase has reached
+        self.assertEqual(natural_order[2], self.selector.natural_word)
+
+        self.pick_first_cell()
+        self.assertEqual(3, len(self.selector.picked_passphrase))
+        self.assertEqual(picked, self.selector.picked_passphrase[:2])
+
     def test_converter_reports_bad_input_without_raising(self) -> None:
         """ Whatever is typed in the converter has to end up as a message, never as a crash"""
         self.tabs.tab_clicked(1)

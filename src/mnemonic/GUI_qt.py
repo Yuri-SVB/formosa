@@ -4,7 +4,7 @@ from PyQt5.QtWidgets import (QMainWindow, QApplication, QWidget, QTabWidget, QLa
 from PyQt5.QtGui import QFont, QFontMetrics, QKeyEvent, QFocusEvent
 from PyQt5.QtCore import Qt
 import mnemonic
-import random
+import secrets
 import sys
 import traceback
 from pathlib import Path
@@ -13,6 +13,12 @@ from pathlib import Path
 sys.dont_write_bytecode = True
 
 ERROR_LOG = Path.home() / Path(".formosa_error.log")
+# The shuffle of the grid keys is the whole of what hides the chosen word from someone
+#  watching the keys pressed, and every permutation it draws is shown on screen for that
+#  watcher to read. The default random module is a Mersenne Twister, whose internal state
+#  can be reconstructed from the output it has already given, so the keys are drawn from
+#  the system entropy source instead, which gives an observer nothing to extrapolate from
+grid_random = secrets.SystemRandom()
 # An error raised while reporting an error must not start the reporting over again
 _reporting_error = False
 # The last error shown, so one which repeats is written down rather than shown again
@@ -571,6 +577,9 @@ class TableSelectorTab(BaseTab):
 
         # Widgets instantiation
         self.reset_button = self.QResetPushButton(self)
+        # Same class as Reset, so clicking it hands focus back to the grid and the
+        #  keys keep working without the user having to click the table again
+        self.back_button = self.QResetPushButton(self)
         self.sel_valid_phrase_label = QLabel(self)
         self.highlight_checkbox = self.QHighlightCheckBox(self)
         self.warning_label = QLabel(self)
@@ -584,7 +593,7 @@ class TableSelectorTab(BaseTab):
         self.grid_fit = ()
         self.resizing = False
         self.panel_max_width = 0
-        self.panel_widgets = [self.reset_button, self.sel_valid_phrase_label,
+        self.panel_widgets = [self.reset_button, self.back_button, self.sel_valid_phrase_label,
                               self.highlight_checkbox, self.warning_label,
                               self.use_custom_set, self.custom_character_entry, self.output_button]
         [each_widget.setEnabled(False) for each_widget in self.panel_widgets]
@@ -639,6 +648,8 @@ class TableSelectorTab(BaseTab):
         self.highlight_checkbox.clicked.connect(self.changed_show_highlight)
         self.reset_button.setText("Reset")
         self.reset_button.clicked.connect(self.reset_selection)
+        self.back_button.setText("Back\n(Backspace)")
+        self.back_button.clicked.connect(self.go_back)
         valid_message = "Selected phrase\nso far is compatible"
         self.sel_valid_phrase_label.setText(valid_message)
         self.sel_valid_phrase_label.setStyleSheet("background-color: " + self.check_color)
@@ -849,11 +860,30 @@ class TableSelectorTab(BaseTab):
         theme_chosen : str
             The theme to be set, must e one of found themes in .json files
         """
+        # Asked before the base class records the new one, and only a real change
+        #  discards the phrase: every tab click calls this with the theme already in
+        #  force, and visiting the tab must not throw away a phrase being built
+        theme_changed = theme_chosen != self.base_theme
         super().set_base_theme(theme_chosen)
         state = self.is_bip39_theme
         [each_widget.setEnabled(not state) for each_widget in self.panel_widgets]
-        self.natural_word = self.parent.base_dict.natural_order[0]
+        natural_order = self.parent.base_dict.natural_order
+        if theme_changed:
+            # A phrase is built out of one theme's lists, so words picked under the
+            #  theme being left cannot be carried into the new one and written out
+            self.picked_passphrase = []
+            self.valid_phrase = True
+        # Read from how many words are held rather than set to the opening word, which
+        #  used to put the grid out of step with a phrase already part way built
+        self.natural_word = natural_order[len(self.picked_passphrase) % len(natural_order)]
+        self.current_state = self.states[0]
+        # The theme may only be changed while no word of a phrase is being held
+        self.select_base_theme.setEnabled(not self.picked_passphrase)
         self.new_grid()
+        self.set_validation_colored_msg()
+        # Enabling the whole panel above has just overridden what these two say about
+        #  the phrase, so they are asked again rather than left reading wrongly
+        self.update_action_buttons()
         self.setFocus()
 
     def init_label_objects(self):
@@ -955,16 +985,16 @@ class TableSelectorTab(BaseTab):
         # Copied before shuffling, otherwise the set the user typed is permuted
         #  in place and there is no longer a record of what was asked for
         input_chars = list(self.input_character_set)
-        random.shuffle(input_chars)
+        grid_random.shuffle(input_chars)
         self.input_set_caseless = input_chars + list([each_char.swapcase() for each_char in input_chars])
         column_char_set = input_chars.copy()
-        random.shuffle(column_char_set)
+        grid_random.shuffle(column_char_set)
         self.input_set_column = column_char_set + list([each_char.swapcase() for each_char in column_char_set])
         line_char_set = input_chars.copy()
-        random.shuffle(line_char_set)
+        grid_random.shuffle(line_char_set)
         self.input_set_line = line_char_set + list([each_char.swapcase() for each_char in line_char_set])
         paragraph_char_set = input_chars.copy()
-        random.shuffle(paragraph_char_set)
+        grid_random.shuffle(paragraph_char_set)
         self.input_set_paragraph = paragraph_char_set + list([each_char.swapcase() for each_char in paragraph_char_set])
         self.permutation_map.update({self.states[0]: self.input_set_caseless})
         self.permutation_map.update({self.states[1]: self.input_set_column})
@@ -1095,11 +1125,14 @@ class TableSelectorTab(BaseTab):
         event : 'QKeyEvent'
             It is the key pressed
         """
-        redo_set_keys = [Qt.Key_Escape, Qt.Key_Backspace, Qt.Key_Delete]
+        redo_set_keys = [Qt.Key_Escape, Qt.Key_Delete]
         if self.is_bip39_theme:
             # The grid does not support BIP39, so there is nothing on screen to select from
             return
-        if event.text() in self.input_set_caseless and self.current_state != self.states[-1]:
+        if event.key() == Qt.Key_Backspace:
+            self.go_back()
+
+        elif event.text() in self.input_set_caseless and self.current_state != self.states[-1]:
 
             self.current_state = self.states[self.states.index(self.current_state) + 1]
             self.selected_indexes[self.current_state] = \
@@ -1108,12 +1141,14 @@ class TableSelectorTab(BaseTab):
 
             char_index = self.permutation_map[self.current_state].index(event.text())
             self.delineate_cells(char_index)
+            self.update_action_buttons()
 
         elif (event.key() in redo_set_keys) and self.current_state != self.states[0]:
             self.current_state = self.states[0]
             char_index = 0
             self.set_validation_colored_msg()
             self.delineate_cells(char_index)
+            self.update_action_buttons()
 
         elif (event.key() == Qt.Key_Enter or event.key() == Qt.Key_Return or event.key() == Qt.Key_Space) and \
                 self.current_state == self.states[-1]:
@@ -1145,17 +1180,19 @@ class TableSelectorTab(BaseTab):
         [[each_label.setStyleSheet(self.defaultbg) for each_label in self.object_dict[each_syntactic_word]]
          for each_syntactic_word in self.object_dict.keys()]
         self.new_grid()
-        self.grayout_gen_button()
+        self.update_action_buttons()
 
-    def grayout_gen_button(self):
+    def update_action_buttons(self):
         """
-            Enable the Generate Phrase button when a whole phrase is picked
-            and disables the Generate Phrase button when the words picked does not form
-            the whole phrase in the Table Selector tab
+            Offer only the actions the phrase so far allows, in the Table Selector tab
+
+            Generate Phrase is offered once whole phrases are picked, and Back once
+             there is a word, or a part typed set of keys, left to give up
         """
         phrase_len = len(self.parent.base_dict.natural_order)
-        state = (len(self.picked_passphrase) % phrase_len == 0) and len(self.picked_passphrase) > 0
-        self.output_button.setEnabled(state)
+        complete = (len(self.picked_passphrase) % phrase_len == 0) and len(self.picked_passphrase) > 0
+        self.output_button.setEnabled(complete)
+        self.back_button.setEnabled(bool(self.picked_passphrase) or self.current_state != self.states[0])
 
     def output_phrases(self):
         """ Print the phrases with the selected words in the Table Selector tab"""
@@ -1348,7 +1385,62 @@ class TableSelectorTab(BaseTab):
             self.delineate_cells(char_index)
             [self.selected_indexes.update({each_key: a}) for each_key in self.selected_indexes.keys()]
 
-        self.grayout_gen_button()
+        self.update_action_buttons()
+
+    def go_back(self):
+        """
+            Step back one move in the Table Selector tab
+
+            Backspace behaves as it does in a text box, taking back the smallest thing
+             behind it: a part typed set of keys is taken back first, so a mistyped key
+             costs one keystroke, and only when nothing is being typed does it give up
+             the word picked before it
+        """
+        if self.is_bip39_theme:
+            return
+        if self.current_state != self.states[0]:
+            self.cancel_selection()
+            return
+        self.undo_last_word()
+
+    def cancel_selection(self):
+        """ Take back the keys typed so far, leaving the words already picked alone"""
+        a = self.COLUMN_LINE_PARAGRAPH_SIZE
+        self.current_state = self.states[0]
+        [self.selected_indexes.update({each_key: a}) for each_key in self.selected_indexes.keys()]
+        self.set_validation_colored_msg()
+        self.delineate_cells(0)
+        self.update_action_buttons()
+
+    def undo_last_word(self) -> bool:
+        """
+            Give up the word picked last and put the grid back on the word it filled
+
+        Returns
+        -------
+        bool
+            Whether there was a word to give up
+        """
+        a = self.COLUMN_LINE_PARAGRAPH_SIZE
+        if not self.picked_passphrase:
+            return False
+        natural_order_list = self.parent.base_dict.natural_order
+        self.picked_passphrase.pop()
+        # Read from how many words are held rather than stepped backwards, so the grid
+        #  cannot be left out of step with the phrase however it was arrived at
+        self.natural_word = natural_order_list[len(self.picked_passphrase) % len(natural_order_list)]
+        self.current_state = self.states[0]
+        [self.selected_indexes.update({each_key: a}) for each_key in self.selected_indexes.keys()]
+        if not self.picked_passphrase:
+            # Nothing is held any more, so the theme is free to be changed again
+            self.select_base_theme.setEnabled(True)
+        # The phrase was perhaps marked incompatible by the very word being given up,
+        #  so the warning is worked out again from the words which are left
+        self.valid_phrase = True
+        self.new_grid()
+        self.check_word_list()
+        self.update_action_buttons()
+        return True
 
     def change_highlight_var(self):
         """ Switch the variable of the highlight checkbox """
@@ -1447,8 +1539,11 @@ class FeaturesTabs(QWidget):
         self.tab_control.addTab(self.theme_converter, self.tab01)
         self.tab_control.addTab(self.table_selector, self.tab02)
 
-        # Config the first tab due to be opening without being clicked
-        self.mnemonic_generator.init_configuration()
+        # Every tab is set up as the window is built. Only the first one used to be,
+        #  so the others opened blank, with unlabelled buttons and an empty theme list,
+        #  and filled themselves in at whatever moment they were first clicked
+        for each_index in range(self.tab_control.count()):
+            self.tab_control.widget(each_index).init_configuration()
         self.tab_control.tabBarClicked.connect(self.tab_clicked)
 
         layout.addWidget(self.tab_control)
