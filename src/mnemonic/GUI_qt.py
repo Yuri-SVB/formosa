@@ -1,7 +1,7 @@
 from PyQt5.QtWidgets import (QMainWindow, QApplication, QWidget, QTabWidget, QLabel, QPushButton, QComboBox,
                              QSpinBox, QLineEdit, QTextEdit, QVBoxLayout, QGridLayout, QCheckBox, QMessageBox,
-                             QSizePolicy)
-from PyQt5.QtGui import QFont, QFontMetrics, QKeyEvent, QFocusEvent
+                             QSizePolicy, QShortcut)
+from PyQt5.QtGui import QFont, QFontMetrics, QKeyEvent, QFocusEvent, QKeySequence
 from PyQt5.QtCore import Qt
 import mnemonic
 import secrets
@@ -1473,6 +1473,14 @@ class QtFormosa(QMainWindow):
         self.table_widget = FeaturesTabs(self)
         self.setCentralWidget(self.table_widget)
 
+        # Held on the window: a shortcut is offered before the key reaches whichever
+        #  widget has the focus, which is what lets these come round again at the ends
+        #  where the plain tab widget would simply stop at the first and the last
+        self.previous_tab_shortcut = QShortcut(QKeySequence("Ctrl+PgUp"), self)
+        self.previous_tab_shortcut.activated.connect(self.table_widget.show_previous_tab)
+        self.next_tab_shortcut = QShortcut(QKeySequence("Ctrl+PgDown"), self)
+        self.next_tab_shortcut.activated.connect(self.table_widget.show_next_tab)
+
     def sorted_themes(self) -> tuple[str]:
         """
             Find all themes in json files
@@ -1544,16 +1552,65 @@ class FeaturesTabs(QWidget):
         #  and filled themselves in at whatever moment they were first clicked
         for each_index in range(self.tab_control.count()):
             self.tab_control.widget(each_index).init_configuration()
-        self.tab_control.tabBarClicked.connect(self.tab_clicked)
+        # Answering the change of tab rather than the click on it, so a tab reached by
+        #  the keyboard is brought up to date the same as one reached by the tab bar
+        self.tab_control.currentChanged.connect(self.tab_shown)
 
         layout.addWidget(self.tab_control)
         self.setLayout(layout)
 
     def tab_clicked(self, tab_index):
-        base_theme = self.tab_control.currentWidget().base_theme
+        """
+            Show a given tab
+
+        Parameters
+        ----------
+        tab_index : int
+            The tab to show
+        """
         self.tab_control.setCurrentIndex(tab_index)
-        self.tab_control.currentWidget().init_configuration()
-        self.tab_control.currentWidget().set_base_theme(base_theme)
+        # Changing the index tells the tab itself, but says nothing when the tab asked
+        #  for is the one already showing, so it is told here as well
+        self.tab_shown(self.tab_control.currentIndex())
+
+    def tab_shown(self, tab_index):
+        """
+            Bring a tab up to date as it is shown, however it was reached
+
+        Parameters
+        ----------
+        tab_index : int
+            The tab being shown
+        """
+        tab = self.tab_control.widget(tab_index)
+        if tab is None:
+            return
+        tab.init_configuration()
+        # Read from the window, which every tab shares, rather than from the tab being
+        #  left, which holds no more than its own copy of it
+        tab.set_base_theme(self.parent.base_theme)
+
+    def show_next_tab(self):
+        """ Show the tab after this one, the first one following the last"""
+        self.step_tab(1)
+
+    def show_previous_tab(self):
+        """ Show the tab before this one, the last one preceding the first"""
+        self.step_tab(-1)
+
+    def step_tab(self, step: int):
+        """
+            Move a given number of tabs along, coming round again at either end
+
+        Parameters
+        ----------
+        step : int
+            How many tabs to move, negative to move backwards
+        """
+        tab_amount = self.tab_control.count()
+        if not tab_amount:
+            return
+        self.tab_clicked((self.tab_control.currentIndex() + step) % tab_amount)
 
 
 def main() -> int:

@@ -558,6 +558,50 @@ class GuiTest(unittest.TestCase):
         self.assertEqual(3, len(self.selector.picked_passphrase))
         self.assertEqual(picked, self.selector.picked_passphrase[:2])
 
+    def test_tab_shortcuts_are_bound(self) -> None:
+        """ Ctrl+PageUp steps to the previous tab, Ctrl+PageDown to the next"""
+        bound = {shortcut.key().toString()
+                 for shortcut in (self.window.previous_tab_shortcut, self.window.next_tab_shortcut)}
+        self.assertEqual({"Ctrl+PgUp", "Ctrl+PgDown"}, bound)
+
+    def test_tabs_come_round_again_at_either_end(self) -> None:
+        """
+            Stepping past the last tab reaches the first, and stepping back past the
+            first reaches the last, which the plain tab widget does not do on its own
+        """
+        tab_amount = self.tabs.tab_control.count()
+        self.assertGreater(tab_amount, 1)
+
+        self.tabs.tab_clicked(tab_amount - 1)
+        self.tabs.show_next_tab()
+        self.assertEqual(0, self.tabs.tab_control.currentIndex())
+
+        self.tabs.show_previous_tab()
+        self.assertEqual(tab_amount - 1, self.tabs.tab_control.currentIndex())
+
+        # A whole turn round lands back where it started, forwards and backwards
+        for step in (self.tabs.show_next_tab, self.tabs.show_previous_tab):
+            self.tabs.tab_clicked(0)
+            for _ in range(tab_amount):
+                step()
+            self.assertEqual(0, self.tabs.tab_control.currentIndex())
+
+    def test_a_tab_reached_by_the_keyboard_is_up_to_date(self) -> None:
+        """
+            The theme was only carried over when a tab was reached through the tab bar,
+            so a tab stepped to by the keyboard was left showing the theme it last saw
+        """
+        self.tabs.tab_clicked(0)
+        self.generator.set_base_theme("medieval_fantasy")
+
+        # stepped to without the tab bar being touched at all
+        while self.tabs.tab_control.currentWidget() is not self.selector:
+            self.tabs.show_next_tab()
+
+        self.assertEqual("medieval_fantasy", self.selector.base_theme)
+        self.assertIn(self.selector.natural_word, self.window.base_dict.natural_order)
+        self.assertTrue(self.selector.current_words())
+
     def test_converter_reports_bad_input_without_raising(self) -> None:
         """ Whatever is typed in the converter has to end up as a message, never as a crash"""
         self.tabs.tab_clicked(1)
