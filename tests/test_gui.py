@@ -18,6 +18,8 @@
 # CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 #
 
+import contextlib
+import io
 import os
 import sys
 import unittest
@@ -81,6 +83,17 @@ class GuiTest(unittest.TestCase):
         self.selector.set_base_theme("medieval_fantasy")
         self.selector.picked_passphrase = list(self.window.base_dict.natural_order)
         self.selector.output_phrases()
+
+    def test_generated_phrase_is_not_printed(self) -> None:
+        """ Generate Phrase copies the secret to clipboard only, never to the terminal"""
+        self.tabs.tab_clicked(2)
+        self.selector.set_base_theme("medieval_fantasy")
+        self.selector.picked_passphrase = list(self.window.base_dict.natural_order)
+        stdout = io.StringIO()
+        with contextlib.redirect_stdout(stdout):
+            self.selector.output_phrases()
+        self.assertEqual("", stdout.getvalue())
+        self.assertIn(self.selector.picked_passphrase[0], QApplication.clipboard().text())
 
     def test_bip39_word_count_which_is_not_a_multiple_of_three(self) -> None:
         """ A typed word count with no matching entropy size used to abort the process"""

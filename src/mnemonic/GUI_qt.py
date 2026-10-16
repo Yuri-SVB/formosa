@@ -1297,17 +1297,13 @@ class TableSelectorTab(BaseTab):
         self.back_button.setEnabled(bool(self.picked_passphrase) or self.current_state != self.states[0])
 
     def output_phrases(self):
-        """ Print the phrases with the selected words in the Table Selector tab"""
+        """ Copy the phrases with the selected words in the Table Selector tab to clipboard"""
         phrase_len = len(self.parent.base_dict.natural_order)
         if (len(self.picked_passphrase) % phrase_len == 0) and len(self.picked_passphrase) > 0:
             output_phrases = ""
-            for i in range(len(self.picked_passphrase)):
-                print(self.picked_passphrase[i][0:2], end="")
-            print("")
             for i in range(len(self.picked_passphrase) // phrase_len):
                 phrase = " ".join(self.picked_passphrase[phrase_len * i:phrase_len * (i + 1)])
                 output_phrases += phrase + " "
-                print(phrase)
             QApplication.clipboard().setText(output_phrases)
 
     def check_word_list(self, word=None):
