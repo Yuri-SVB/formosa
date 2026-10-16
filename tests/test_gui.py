@@ -602,6 +602,120 @@ class GuiTest(unittest.TestCase):
         self.assertIn(self.selector.natural_word, self.window.base_dict.natural_order)
         self.assertTrue(self.selector.current_words())
 
+    def pick_cell(self, cell_index: int) -> None:
+        """ Pick a given cell of the grid by the keys written on it"""
+        for each_key in self.selector.current_words()[cell_index].text().split("-")[0]:
+            self.press_key(ord(each_key.upper()), each_key)
+        self.press_key(Qt.Key_Return, "\r")
+
+    def pick_words(self, amount: int) -> list:
+        """ Pick the opening cell the given number of times and return the phrase"""
+        for _ in range(amount):
+            self.pick_cell(0)
+        return list(self.selector.picked_passphrase)
+
+    def test_arrows_walk_back_and_forth_over_the_phrase(self) -> None:
+        """ Left steps to the previous word of the phrase, right to the next"""
+        self.tabs.tab_clicked(2)
+        self.selector.set_base_theme("medieval_fantasy")
+        natural_order = self.window.base_dict.natural_order
+        picked = self.pick_words(3)
+        self.assertEqual(3, self.selector.word_cursor)
+
+        for expected in (2, 1, 0):
+            self.press_key(Qt.Key_Left)
+            self.assertEqual(expected, self.selector.word_cursor)
+            self.assertEqual(natural_order[expected], self.selector.natural_word)
+        # walking about never disturbs the words themselves
+        self.assertEqual(picked, self.selector.picked_passphrase)
+
+        for expected in (1, 2, 3):
+            self.press_key(Qt.Key_Right)
+            self.assertEqual(expected, self.selector.word_cursor)
+        self.assertEqual(picked, self.selector.picked_passphrase)
+
+    def test_arrows_come_round_again_at_either_end(self) -> None:
+        """ Left from the first word reaches the last reachable one, and back again"""
+        self.tabs.tab_clicked(2)
+        self.selector.set_base_theme("medieval_fantasy")
+        self.pick_words(3)
+
+        self.selector.set_word_cursor(0)
+        self.press_key(Qt.Key_Left)
+        self.assertEqual(3, self.selector.word_cursor)
+
+        self.press_key(Qt.Key_Right)
+        self.assertEqual(0, self.selector.word_cursor)
+
+    def test_arrows_never_reach_a_word_never_given(self) -> None:
+        """
+            Only the words picked can be walked to, and the one being filled after
+            them, so stepping on never lands on a word nothing was ever picked for
+        """
+        self.tabs.tab_clicked(2)
+        self.selector.set_base_theme("medieval_fantasy")
+
+        # with nothing picked there is nowhere to go
+        for key in (Qt.Key_Left, Qt.Key_Right):
+            self.press_key(key)
+            self.assertEqual(0, self.selector.word_cursor)
+
+        self.pick_words(2)
+        reached = set()
+        for _ in range(12):
+            self.press_key(Qt.Key_Right)
+            reached.add(self.selector.word_cursor)
+        for _ in range(12):
+            self.press_key(Qt.Key_Left)
+            reached.add(self.selector.word_cursor)
+        self.assertEqual({0, 1, 2}, reached)
+
+    def test_picking_in_the_middle_swaps_only_that_word(self) -> None:
+        """ A word picked where the grid stands replaces that one, keeping the rest"""
+        self.tabs.tab_clicked(2)
+        self.selector.set_base_theme("nationalities")
+        picked = self.pick_words(3)
+
+        self.selector.set_word_cursor(1)
+        self.pick_cell(1)
+        swapped = self.selector.picked_passphrase
+        self.assertEqual(len(picked), len(swapped), "the phrase changed length")
+        self.assertEqual(picked[0], swapped[0])
+        self.assertEqual(picked[2], swapped[2])
+        self.assertNotEqual(picked[1], swapped[1])
+        # and the grid moves on to the word after the one just given
+        self.assertEqual(2, self.selector.word_cursor)
+
+    def test_a_swap_breaking_the_chain_is_flagged_and_recovers(self) -> None:
+        """
+            A word swapped in the middle can leave one after it that its new leader
+            does not allow, which the phrase indicator has to show, and stop showing
+            once a leading word is put back
+        """
+        self.tabs.tab_clicked(2)
+        self.selector.set_base_theme("medieval_fantasy")
+        words_dictionary = self.window.base_dict
+        self.pick_words(2)
+        subject = self.selector.picked_passphrase[0]
+        self.assertTrue(self.selector.phrase_follows_theme())
+
+        # VERB leads SUBJECT, so a verb which does not lead the subject already
+        #  picked orphans it
+        mapping = words_dictionary["VERB"]["SUBJECT"].mapping
+        verbs = words_dictionary["VERB"].total_words
+        breaking = next(i for i, each in enumerate(verbs) if subject not in mapping.get(each, []))
+        self.press_key(Qt.Key_Left)
+        self.pick_cell(breaking)
+        self.assertFalse(self.selector.phrase_follows_theme())
+        self.assertFalse(self.selector.valid_phrase)
+        self.assertEqual("Incompatible phrase", self.selector.sel_valid_phrase_label.text())
+
+        leading = next(i for i, each in enumerate(verbs) if subject in mapping.get(each, []))
+        self.press_key(Qt.Key_Left)
+        self.pick_cell(leading)
+        self.assertTrue(self.selector.phrase_follows_theme())
+        self.assertTrue(self.selector.valid_phrase)
+
     def test_converter_reports_bad_input_without_raising(self) -> None:
         """ Whatever is typed in the converter has to end up as a message, never as a crash"""
         self.tabs.tab_clicked(1)

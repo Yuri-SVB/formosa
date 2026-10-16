@@ -565,6 +565,8 @@ class TableSelectorTab(BaseTab):
         self.input_set_line = []
         self.input_set_paragraph = []
         self.picked_passphrase = []
+        # Which word of the phrase the grid is standing on
+        self.word_cursor = 0
         self.panel_widgets = []
         # The states represent what was the last defined dimension
         self.states = ("initial", "column_done", "line_done", "paragraph_done")
@@ -615,9 +617,78 @@ class TableSelectorTab(BaseTab):
         """
         natural_order = self.parent.base_dict.natural_order
         if self.natural_word not in natural_order:
-            self.natural_word = natural_order[0] if natural_order else ""
             self.picked_passphrase = []
+            self.set_word_cursor(0)
         return self.object_dict.get(self.natural_word, [])
+
+    def set_word_cursor(self, position: int):
+        """
+            Stand the grid on a given word of the phrase
+
+        Parameters
+        ----------
+        position : int
+            Which word of the phrase to stand on, held within the words there are
+        """
+        natural_order = self.parent.base_dict.natural_order
+        if not natural_order:
+            self.natural_word = ""
+            return
+        # Only as far as the word being filled, never past the end of the phrase
+        self.word_cursor = max(0, min(position, len(self.picked_passphrase)))
+        self.natural_word = natural_order[self.word_cursor % len(natural_order)]
+
+    def step_word(self, step: int):
+        """
+            Move the grid a word along the phrase, coming round again at either end
+
+            Only the words already picked can be reached, and the one being filled
+             after them, so moving on never skips a word which was never given
+
+        Parameters
+        ----------
+        step : int
+            How many words to move, negative to move back
+        """
+        if self.is_bip39_theme:
+            return
+        a = self.COLUMN_LINE_PARAGRAPH_SIZE
+        # Every word picked, and the one being filled after the last of them
+        reachable = len(self.picked_passphrase) + 1
+        self.set_word_cursor((self.word_cursor + step) % reachable)
+        self.current_state = self.states[0]
+        [self.selected_indexes.update({each_key: a}) for each_key in self.selected_indexes.keys()]
+        self.new_grid()
+        self.check_word_list()
+        self.update_action_buttons()
+
+    def phrase_follows_theme(self) -> bool:
+        """
+            Whether every word picked is one the word leading it allows
+
+        Returns
+        -------
+        bool
+            Whether the phrase so far reads as the theme permits
+        """
+        themed_dict = self.parent.base_dict
+        natural_order = themed_dict.natural_order
+        if not natural_order:
+            return True
+        for position, each_word in enumerate(self.picked_passphrase):
+            syntactic_word = natural_order[position % len(natural_order)]
+            led_by = themed_dict[syntactic_word].led_by
+            # A word standing on its own has nothing to disagree with
+            if led_by not in natural_order:
+                continue
+            sentence_start = (position // len(natural_order)) * len(natural_order)
+            led_by_position = natural_order.index(led_by) + sentence_start
+            if led_by_position >= len(self.picked_passphrase):
+                continue
+            mapping = themed_dict[led_by][syntactic_word].mapping
+            if each_word not in mapping.get(self.picked_passphrase[led_by_position], []):
+                return False
+        return True
 
     def clear_grid(self):
         """ Clear grid variables and widgets"""
@@ -867,15 +938,14 @@ class TableSelectorTab(BaseTab):
         super().set_base_theme(theme_chosen)
         state = self.is_bip39_theme
         [each_widget.setEnabled(not state) for each_widget in self.panel_widgets]
-        natural_order = self.parent.base_dict.natural_order
         if theme_changed:
             # A phrase is built out of one theme's lists, so words picked under the
             #  theme being left cannot be carried into the new one and written out
             self.picked_passphrase = []
             self.valid_phrase = True
-        # Read from how many words are held rather than set to the opening word, which
-        #  used to put the grid out of step with a phrase already part way built
-        self.natural_word = natural_order[len(self.picked_passphrase) % len(natural_order)]
+        # Held within the phrase rather than set back to its opening word, which used
+        #  to put the grid out of step with a phrase already part way built
+        self.set_word_cursor(self.word_cursor)
         self.current_state = self.states[0]
         # The theme may only be changed while no word of a phrase is being held
         self.select_base_theme.setEnabled(not self.picked_passphrase)
@@ -1132,6 +1202,12 @@ class TableSelectorTab(BaseTab):
         if event.key() == Qt.Key_Backspace:
             self.go_back()
 
+        elif event.key() == Qt.Key_Left:
+            self.step_word(-1)
+
+        elif event.key() == Qt.Key_Right:
+            self.step_word(1)
+
         elif event.text() in self.input_set_caseless and self.current_state != self.states[-1]:
 
             self.current_state = self.states[self.states.index(self.current_state) + 1]
@@ -1168,7 +1244,7 @@ class TableSelectorTab(BaseTab):
     def reset_selection(self):
         """ Reset the variables and words which were selected so far in the Table Selector tab"""
         self.picked_passphrase = []
-        self.natural_word = self.parent.base_dict.natural_order[0]
+        self.set_word_cursor(0)
         self.current_state = self.states[0]
         self.valid_phrase = True
         self.set_validation_colored_msg()
@@ -1221,7 +1297,9 @@ class TableSelectorTab(BaseTab):
             also not all steps are evaluated
             because the filling order is not the same as natural order
         """
-        checklist = self.picked_passphrase.copy()
+        # Up to where the grid stands, so a word being weighed in the middle of a
+        #  phrase is judged against the words leading it rather than the whole phrase
+        checklist = self.picked_passphrase[:self.word_cursor].copy()
         if word is not None:
             checklist.append(word)
         state = True
@@ -1369,16 +1447,21 @@ class TableSelectorTab(BaseTab):
         self.current_state = self.states[0]
         char_index = 0
         if word_index < len(words_list):
-            natural_order_list = self.parent.base_dict.natural_order
 
             self.select_base_theme.setEnabled(False)
-            self.picked_passphrase.append(words_list[word_index])
+            if self.word_cursor < len(self.picked_passphrase):
+                # Standing on a word already picked, so it is swapped for the new one
+                #  and the words after it are left as they are
+                self.picked_passphrase[self.word_cursor] = words_list[word_index]
+            else:
+                self.picked_passphrase.append(words_list[word_index])
             self.delineate_cells(char_index)
             [self.selected_indexes.update({each_key: a}) for each_key in self.selected_indexes.keys()]
 
-            self.natural_word = natural_order_list[natural_order_list.index(self.natural_word) + 1] if \
-                self.natural_word != natural_order_list[-1] else natural_order_list[0]
-
+            self.set_word_cursor(self.word_cursor + 1)
+            # Swapping a word in the middle can leave a word after it one its new
+            #  leader does not allow, so the whole phrase is weighed again
+            self.valid_phrase = self.phrase_follows_theme()
             self.new_grid()
             self.set_validation_colored_msg()
         else:
@@ -1424,11 +1507,10 @@ class TableSelectorTab(BaseTab):
         a = self.COLUMN_LINE_PARAGRAPH_SIZE
         if not self.picked_passphrase:
             return False
-        natural_order_list = self.parent.base_dict.natural_order
         self.picked_passphrase.pop()
         # Read from how many words are held rather than stepped backwards, so the grid
         #  cannot be left out of step with the phrase however it was arrived at
-        self.natural_word = natural_order_list[len(self.picked_passphrase) % len(natural_order_list)]
+        self.set_word_cursor(len(self.picked_passphrase))
         self.current_state = self.states[0]
         [self.selected_indexes.update({each_key: a}) for each_key in self.selected_indexes.keys()]
         if not self.picked_passphrase:
@@ -1436,7 +1518,7 @@ class TableSelectorTab(BaseTab):
             self.select_base_theme.setEnabled(True)
         # The phrase was perhaps marked incompatible by the very word being given up,
         #  so the warning is worked out again from the words which are left
-        self.valid_phrase = True
+        self.valid_phrase = self.phrase_follows_theme()
         self.new_grid()
         self.check_word_list()
         self.update_action_buttons()
