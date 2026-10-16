@@ -582,6 +582,7 @@ class TableSelectorTab(BaseTab):
         # Same class as Reset, so clicking it hands focus back to the grid and the
         #  keys keep working without the user having to click the table again
         self.back_button = self.QResetPushButton(self)
+        self.word_position_label = QLabel(self)
         self.sel_valid_phrase_label = QLabel(self)
         self.highlight_checkbox = self.QHighlightCheckBox(self)
         self.warning_label = QLabel(self)
@@ -595,7 +596,8 @@ class TableSelectorTab(BaseTab):
         self.grid_fit = ()
         self.resizing = False
         self.panel_max_width = 0
-        self.panel_widgets = [self.reset_button, self.back_button, self.sel_valid_phrase_label,
+        self.panel_widgets = [self.reset_button, self.back_button,
+                              self.word_position_label, self.sel_valid_phrase_label,
                               self.highlight_checkbox, self.warning_label,
                               self.use_custom_set, self.custom_character_entry, self.output_button]
         [each_widget.setEnabled(False) for each_widget in self.panel_widgets]
@@ -637,6 +639,29 @@ class TableSelectorTab(BaseTab):
         # Only as far as the word being filled, never past the end of the phrase
         self.word_cursor = max(0, min(position, len(self.picked_passphrase)))
         self.natural_word = natural_order[self.word_cursor % len(natural_order)]
+        self.update_word_position()
+
+    def update_word_position(self):
+        """
+            Say which word of the phrase the grid is standing on
+
+            The arrows move the grid about without the words on it saying where it
+             went, so the place is written out beside the compatibility of the phrase
+        """
+        natural_order = self.parent.base_dict.natural_order
+        if not natural_order:
+            self.word_position_label.setText("")
+            return
+        phrase_length = len(natural_order)
+        place_in_phrase = self.word_cursor % phrase_length
+        phrases_before = self.word_cursor // phrase_length
+        place = "Word %d of %d" % (place_in_phrase + 1, phrase_length)
+        if phrases_before:
+            # Only once a phrase has been finished is there more than one to tell apart
+            place = "Phrase %d, word %d of %d" % (phrases_before + 1, place_in_phrase + 1, phrase_length)
+        # The grid shows the words of a syntactic word without ever naming it
+        named = natural_order[place_in_phrase].replace("_", " ").capitalize()
+        self.word_position_label.setText("%s\n%s" % (place, named))
 
     def step_word(self, step: int):
         """
@@ -731,6 +756,7 @@ class TableSelectorTab(BaseTab):
         self.output_button.setText("Generate\nPhrase")
         self.output_button.clicked.connect(self.output_phrases)
         self.output_button.setEnabled(False)
+        self.update_word_position()
 
         self.new_grid()
         self.set_tab_layout()

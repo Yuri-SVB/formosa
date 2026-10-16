@@ -716,6 +716,81 @@ class GuiTest(unittest.TestCase):
         self.assertTrue(self.selector.phrase_follows_theme())
         self.assertTrue(self.selector.valid_phrase)
 
+    def test_word_position_sits_with_the_compatibility_label(self) -> None:
+        """ The two say what the phrase is doing, so they are read together"""
+        panel = self.selector.panel_widgets
+        self.assertIn(self.selector.word_position_label, panel)
+        self.assertEqual(panel.index(self.selector.sel_valid_phrase_label) - 1,
+                         panel.index(self.selector.word_position_label))
+
+    def test_word_position_says_where_the_grid_stands(self) -> None:
+        """
+            The arrows move the grid about without the words on it saying where it
+            went, so the place in the phrase is written out
+        """
+        self.tabs.tab_clicked(2)
+        self.selector.set_base_theme("medieval_fantasy")
+        natural_order = self.window.base_dict.natural_order
+        label = self.selector.word_position_label
+
+        self.assertEqual("Word 1 of %d\nSubject" % len(natural_order), label.text())
+        for expected in range(2, 5):
+            self.pick_cell(0)
+            with self.subTest(word=expected):
+                self.assertTrue(label.text().startswith("Word %d of %d" % (expected, len(natural_order))))
+                named = natural_order[expected - 1].replace("_", " ").capitalize()
+                self.assertTrue(label.text().endswith(named), label.text())
+
+    def test_word_position_follows_the_arrows(self) -> None:
+        """ Stepping about the phrase is reflected as it happens"""
+        self.tabs.tab_clicked(2)
+        self.selector.set_base_theme("medieval_fantasy")
+        phrase_length = len(self.window.base_dict.natural_order)
+        self.pick_words(3)
+        label = self.selector.word_position_label
+
+        self.press_key(Qt.Key_Left)
+        self.assertTrue(label.text().startswith("Word 3 of %d" % phrase_length), label.text())
+        self.press_key(Qt.Key_Left)
+        self.assertTrue(label.text().startswith("Word 2 of %d" % phrase_length), label.text())
+        self.press_key(Qt.Key_Right)
+        self.assertTrue(label.text().startswith("Word 3 of %d" % phrase_length), label.text())
+
+        # and after giving a word up it says the word now being filled
+        self.press_key(Qt.Key_Backspace)
+        self.assertTrue(label.text().startswith("Word %d of %d" % (self.selector.word_cursor + 1, phrase_length)),
+                        label.text())
+
+    def test_word_position_tells_the_phrases_apart(self) -> None:
+        """ Past the first phrase the word alone no longer says where the grid is"""
+        self.tabs.tab_clicked(2)
+        self.selector.set_base_theme("nationalities")
+        phrase_length = len(self.window.base_dict.natural_order)
+        label = self.selector.word_position_label
+
+        self.pick_words(phrase_length - 1)
+        self.assertNotIn("Phrase", label.text())
+
+        # the word completing the first phrase moves the grid on to the second
+        self.pick_cell(0)
+        self.assertTrue(label.text().startswith("Phrase 2, word 1 of %d" % phrase_length), label.text())
+
+    def test_word_position_fits_the_panel(self) -> None:
+        """ The longest thing it says has to be readable in the narrowest window"""
+        from PyQt5.QtGui import QFontMetrics
+        self.tabs.tab_clicked(2)
+        self.window.resize(*self.SMALL_SCREEN)
+        label = self.selector.word_position_label
+        for theme in ("medieval_fantasy", "cute_pets", "nationalities"):
+            self.selector.set_base_theme(theme)
+            phrase_length = len(self.window.base_dict.natural_order)
+            self.pick_words(phrase_length + 2)
+            self.application.processEvents()
+            metrics = QFontMetrics(label.font())
+            widest = max(metrics.horizontalAdvance(line) for line in label.text().split("\n"))
+            with self.subTest(theme=theme, says=label.text()):
+                self.assertLessEqual(widest, label.width())
+
     def test_converter_reports_bad_input_without_raising(self) -> None:
         """ Whatever is typed in the converter has to end up as a message, never as a crash"""
         self.tabs.tab_clicked(1)
