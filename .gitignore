@@ -2,7 +2,7 @@
 
 build/
 dist/
-mnemonic.egg-info/
+*.egg-info/
 .tox/
 .python-version
 
@@ -25,6 +25,10 @@ tools/edit_themes/*
 src/mnemonic/themes/xxx.json
 src/mnemonic/themes/templates/xxx.ods
 src/mnemonic/themes/templates/xxx.py
+
+# generated secrets - the Save button writes seed phrases here in plain text
+output.txt
+.formosa_error.log
 
 # IDE folder
 .idea/

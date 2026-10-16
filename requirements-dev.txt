@@ -1,0 +1,7 @@
+-r requirements.txt
+
+# Regenerating the test vectors (tools/generate_vectors.py)
+bip32utils==0.3.post4
+
+# Linting
+flake8

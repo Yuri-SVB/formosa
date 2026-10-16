@@ -1,15 +1,28 @@
 from PyQt5.QtWidgets import (QMainWindow, QApplication, QWidget, QTabWidget, QLabel, QPushButton, QComboBox,
                              QSpinBox, QLineEdit, QTextEdit, QVBoxLayout, QGridLayout, QCheckBox, QMessageBox,
-                             QSizePolicy)
-from PyQt5.QtGui import QFont, QFontMetrics, QKeyEvent, QFocusEvent
+                             QSizePolicy, QShortcut)
+from PyQt5.QtGui import QFont, QFontMetrics, QKeyEvent, QFocusEvent, QKeySequence
 from PyQt5.QtCore import Qt
 import mnemonic
-import random
+import secrets
 import sys
 import traceback
+from pathlib import Path
 
 # This prevents IDE from creating a cache file
 sys.dont_write_bytecode = True
+
+ERROR_LOG = Path.home() / Path(".formosa_error.log")
+# The shuffle of the grid keys is the whole of what hides the chosen word from someone
+#  watching the keys pressed, and every permutation it draws is shown on screen for that
+#  watcher to read. The default random module is a Mersenne Twister, whose internal state
+#  can be reconstructed from the output it has already given, so the keys are drawn from
+#  the system entropy source instead, which gives an observer nothing to extrapolate from
+grid_random = secrets.SystemRandom()
+# An error raised while reporting an error must not start the reporting over again
+_reporting_error = False
+# The last error shown, so one which repeats is written down rather than shown again
+_last_reported = None
 
 
 def excepthook(exception_type, exception_value, exception_traceback):
@@ -19,11 +32,42 @@ def excepthook(exception_type, exception_value, exception_traceback):
         PyQt5 calls qFatal(), which aborts the process, whenever a Python exception
          propagates out of a signal handler. Installing a hook of our own keeps the
          window alive and tells the user what went wrong rather than vanishing on them.
+
+        Nothing here is allowed to raise. An error escaping this hook would hand the
+         process back to qFatal, which is the very abort the hook is here to prevent,
+         and would leave the terminal with no trace of what actually went wrong.
     """
-    traceback.print_exception(exception_type, exception_value, exception_traceback)
-    if QApplication.instance() is not None:
-        QMessageBox.critical(None, "Formosa", "Something went wrong:\n\n%s: %s"
-                             % (exception_type.__name__, exception_value))
+    global _reporting_error, _last_reported
+    report = "".join(traceback.format_exception(exception_type, exception_value, exception_traceback))
+    try:
+        sys.stderr.write(report)
+        sys.stderr.flush()
+    except Exception:
+        pass
+    try:
+        # Kept on disk as well, since the window is often started without a terminal
+        with open(ERROR_LOG, "a", encoding="utf-8") as error_file:
+            error_file.write(report)
+    except Exception:
+        pass
+    if _reporting_error:
+        # Already showing one, a second window on top of it would only hide the first
+        return
+    same_error = (exception_type.__name__, str(exception_value))
+    if same_error == _last_reported:
+        # A window manager resizing a window sends events in a stream, so the same
+        #  error can arrive over and over. It is written down, but shown only once
+        return
+    _last_reported = same_error
+    _reporting_error = True
+    try:
+        if QApplication.instance() is not None:
+            QMessageBox.critical(None, "Formosa", "Something went wrong:\n\n%s: %s\n\nWritten to %s"
+                                 % (exception_type.__name__, exception_value, ERROR_LOG))
+    except Exception:
+        pass
+    finally:
+        _reporting_error = False
 
 
 class BaseTab(QWidget):
@@ -182,13 +226,23 @@ class MnemonicGeneratorTab(BaseTab):
         self.config_phrases_selector()
         self.enable_checkboxes()
 
+    def phrases_range(self) -> tuple:
+        """
+            The least and the most phrases the theme in force is able to encode
+
+        Returns
+        -------
+        tuple
+            The smallest and the largest amount of phrases which can be generated
+        """
+        return (3, 24) if self.is_bip39_theme else (1, 8)
+
     def config_phrases_selector(self):
         """ Set the correct values to be selected while generating random phrases"""
-        min_phrases = step_phrases = default_value = 3 if self.is_bip39_theme else 1
-        max_phrases = 24 if self.is_bip39_theme else 8
+        min_phrases, max_phrases = self.phrases_range()
         self.select_phrases.setRange(min_phrases, max_phrases)
-        self.select_phrases.setSingleStep(step_phrases)
-        self.select_phrases.setValue(default_value)
+        self.select_phrases.setSingleStep(min_phrases)
+        self.select_phrases.setValue(min_phrases)
         self.select_phrases.setWrapping(True)
 
     def selected_phrases(self) -> int:
@@ -203,10 +257,16 @@ class MnemonicGeneratorTab(BaseTab):
         int
             The amount of phrases which the current theme is able to generate
         """
+        min_phrases, max_phrases = self.phrases_range()
+        if (self.select_phrases.minimum(), self.select_phrases.maximum()) != (min_phrases, max_phrases):
+            # The theme belongs to the window and can be changed from any tab, which
+            #  leaves this box offering the amounts of the theme it was last set for
+            self.select_phrases.setRange(min_phrases, max_phrases)
+            self.select_phrases.setSingleStep(min_phrases)
         phrase_size = self.select_phrases.value()
         if self.is_bip39_theme:
             # Every 3 BIP39 words encode 32 bits of entropy, so partial groups cannot be built
-            phrase_size = max(3, phrase_size - phrase_size % 3)
+            phrase_size = max(min_phrases, phrase_size - phrase_size % 3)
         if phrase_size != self.select_phrases.value():
             self.select_phrases.setValue(phrase_size)
         return phrase_size
@@ -431,6 +491,7 @@ class ThemeConverterTab(BaseTab):
 
 class TableSelectorTab(BaseTab):
     COLUMN_LINE_PARAGRAPH_SIZE = 8
+    DEFAULT_KEYS = ("A", "S", "D", "F", "J", "K", "L", ";")
     # The table is never scrolled, so the writing is what gives way when room runs short
     SMALLEST_GRID_FONT = 4
     LARGEST_GRID_FONT = 14
@@ -498,12 +559,14 @@ class TableSelectorTab(BaseTab):
         self.column_objects = []
         self.line_objects = []
         self.paragraph_objects = []
-        self.input_character_set = []
+        self.input_character_set = list(self.DEFAULT_KEYS)
         self.input_set_caseless = []
         self.input_set_column = []
         self.input_set_line = []
         self.input_set_paragraph = []
         self.picked_passphrase = []
+        # Which word of the phrase the grid is standing on
+        self.word_cursor = 0
         self.panel_widgets = []
         # The states represent what was the last defined dimension
         self.states = ("initial", "column_done", "line_done", "paragraph_done")
@@ -516,6 +579,10 @@ class TableSelectorTab(BaseTab):
 
         # Widgets instantiation
         self.reset_button = self.QResetPushButton(self)
+        # Same class as Reset, so clicking it hands focus back to the grid and the
+        #  keys keep working without the user having to click the table again
+        self.back_button = self.QResetPushButton(self)
+        self.word_position_label = QLabel(self)
         self.sel_valid_phrase_label = QLabel(self)
         self.highlight_checkbox = self.QHighlightCheckBox(self)
         self.warning_label = QLabel(self)
@@ -527,8 +594,10 @@ class TableSelectorTab(BaseTab):
         self.grid_holder.setLayout(self.grid_frame_selector)
         # The font size and word length the grid was last fitted with
         self.grid_fit = ()
+        self.resizing = False
         self.panel_max_width = 0
-        self.panel_widgets = [self.reset_button, self.sel_valid_phrase_label,
+        self.panel_widgets = [self.reset_button, self.back_button,
+                              self.word_position_label, self.sel_valid_phrase_label,
                               self.highlight_checkbox, self.warning_label,
                               self.use_custom_set, self.custom_character_entry, self.output_button]
         [each_widget.setEnabled(False) for each_widget in self.panel_widgets]
@@ -550,9 +619,101 @@ class TableSelectorTab(BaseTab):
         """
         natural_order = self.parent.base_dict.natural_order
         if self.natural_word not in natural_order:
-            self.natural_word = natural_order[0] if natural_order else ""
             self.picked_passphrase = []
+            self.set_word_cursor(0)
         return self.object_dict.get(self.natural_word, [])
+
+    def set_word_cursor(self, position: int):
+        """
+            Stand the grid on a given word of the phrase
+
+        Parameters
+        ----------
+        position : int
+            Which word of the phrase to stand on, held within the words there are
+        """
+        natural_order = self.parent.base_dict.natural_order
+        if not natural_order:
+            self.natural_word = ""
+            return
+        # Only as far as the word being filled, never past the end of the phrase
+        self.word_cursor = max(0, min(position, len(self.picked_passphrase)))
+        self.natural_word = natural_order[self.word_cursor % len(natural_order)]
+        self.update_word_position()
+
+    def update_word_position(self):
+        """
+            Say which word of the phrase the grid is standing on
+
+            The arrows move the grid about without the words on it saying where it
+             went, so the place is written out beside the compatibility of the phrase
+        """
+        natural_order = self.parent.base_dict.natural_order
+        if not natural_order:
+            self.word_position_label.setText("")
+            return
+        phrase_length = len(natural_order)
+        place_in_phrase = self.word_cursor % phrase_length
+        phrases_before = self.word_cursor // phrase_length
+        place = "Word %d of %d" % (place_in_phrase + 1, phrase_length)
+        if phrases_before:
+            # Only once a phrase has been finished is there more than one to tell apart
+            place = "Phrase %d, word %d of %d" % (phrases_before + 1, place_in_phrase + 1, phrase_length)
+        # The grid shows the words of a syntactic word without ever naming it
+        named = natural_order[place_in_phrase].replace("_", " ").capitalize()
+        self.word_position_label.setText("%s\n%s" % (place, named))
+
+    def step_word(self, step: int):
+        """
+            Move the grid a word along the phrase, coming round again at either end
+
+            Only the words already picked can be reached, and the one being filled
+             after them, so moving on never skips a word which was never given
+
+        Parameters
+        ----------
+        step : int
+            How many words to move, negative to move back
+        """
+        if self.is_bip39_theme:
+            return
+        a = self.COLUMN_LINE_PARAGRAPH_SIZE
+        # Every word picked, and the one being filled after the last of them
+        reachable = len(self.picked_passphrase) + 1
+        self.set_word_cursor((self.word_cursor + step) % reachable)
+        self.current_state = self.states[0]
+        [self.selected_indexes.update({each_key: a}) for each_key in self.selected_indexes.keys()]
+        self.new_grid()
+        self.check_word_list()
+        self.update_action_buttons()
+
+    def phrase_follows_theme(self) -> bool:
+        """
+            Whether every word picked is one the word leading it allows
+
+        Returns
+        -------
+        bool
+            Whether the phrase so far reads as the theme permits
+        """
+        themed_dict = self.parent.base_dict
+        natural_order = themed_dict.natural_order
+        if not natural_order:
+            return True
+        for position, each_word in enumerate(self.picked_passphrase):
+            syntactic_word = natural_order[position % len(natural_order)]
+            led_by = themed_dict[syntactic_word].led_by
+            # A word standing on its own has nothing to disagree with
+            if led_by not in natural_order:
+                continue
+            sentence_start = (position // len(natural_order)) * len(natural_order)
+            led_by_position = natural_order.index(led_by) + sentence_start
+            if led_by_position >= len(self.picked_passphrase):
+                continue
+            mapping = themed_dict[led_by][syntactic_word].mapping
+            if each_word not in mapping.get(self.picked_passphrase[led_by_position], []):
+                return False
+        return True
 
     def clear_grid(self):
         """ Clear grid variables and widgets"""
@@ -583,6 +744,8 @@ class TableSelectorTab(BaseTab):
         self.highlight_checkbox.clicked.connect(self.changed_show_highlight)
         self.reset_button.setText("Reset")
         self.reset_button.clicked.connect(self.reset_selection)
+        self.back_button.setText("Back\n(Backspace)")
+        self.back_button.clicked.connect(self.go_back)
         valid_message = "Selected phrase\nso far is compatible"
         self.sel_valid_phrase_label.setText(valid_message)
         self.sel_valid_phrase_label.setStyleSheet("background-color: " + self.check_color)
@@ -593,6 +756,7 @@ class TableSelectorTab(BaseTab):
         self.output_button.setText("Generate\nPhrase")
         self.output_button.clicked.connect(self.output_phrases)
         self.output_button.setEnabled(False)
+        self.update_word_position()
 
         self.new_grid()
         self.set_tab_layout()
@@ -635,9 +799,16 @@ class TableSelectorTab(BaseTab):
         super().resizeEvent(event)
         # The base class lays the tab out while this one is still being built,
         #  so the panel is only measured once its widgets are in place
-        if getattr(self, "panel_widgets", None):
+        if not getattr(self, "panel_widgets", None) or self.resizing:
+            return
+        # Fitting the grid lays the tab out again, and a window manager resizing a
+        #  window sends a stream of these, so one pass is never re-entered by another
+        self.resizing = True
+        try:
             self.update_panel_width()
             self.fit_grid_to_view()
+        finally:
+            self.resizing = False
 
     def displayed_paragraphs(self, words_amount: int) -> int:
         """
@@ -786,11 +957,29 @@ class TableSelectorTab(BaseTab):
         theme_chosen : str
             The theme to be set, must e one of found themes in .json files
         """
+        # Asked before the base class records the new one, and only a real change
+        #  discards the phrase: every tab click calls this with the theme already in
+        #  force, and visiting the tab must not throw away a phrase being built
+        theme_changed = theme_chosen != self.base_theme
         super().set_base_theme(theme_chosen)
         state = self.is_bip39_theme
         [each_widget.setEnabled(not state) for each_widget in self.panel_widgets]
-        self.natural_word = self.parent.base_dict.natural_order[0]
+        if theme_changed:
+            # A phrase is built out of one theme's lists, so words picked under the
+            #  theme being left cannot be carried into the new one and written out
+            self.picked_passphrase = []
+            self.valid_phrase = True
+        # Held within the phrase rather than set back to its opening word, which used
+        #  to put the grid out of step with a phrase already part way built
+        self.set_word_cursor(self.word_cursor)
+        self.current_state = self.states[0]
+        # The theme may only be changed while no word of a phrase is being held
+        self.select_base_theme.setEnabled(not self.picked_passphrase)
         self.new_grid()
+        self.set_validation_colored_msg()
+        # Enabling the whole panel above has just overridden what these two say about
+        #  the phrase, so they are asked again rather than left reading wrongly
+        self.update_action_buttons()
         self.setFocus()
 
     def init_label_objects(self):
@@ -846,40 +1035,62 @@ class TableSelectorTab(BaseTab):
         else:
             self.custom_character_entry.setEnabled(False)
             self.custom_character_entry.setText("")
+            # Unticking used to leave the custom keys in force, with nothing on screen
+            #  saying so and the box emptied of the only record of what they were
+            self.input_character_set = list(self.DEFAULT_KEYS)
             self.new_grid()
 
     def define_key_list(self):
-        """ Set the keys used as index of the grid in the Table Selector tab"""
-        input_character_set = ["A", "S", "D", "F", "J", "K", "L", ";"]
-        characters_list = list(self.custom_character_entry.text().upper())
-        self.input_character_set = input_character_set
+        """
+            Set the keys used as index of the grid in the Table Selector tab
 
-        # Check whether the characters are all given and unique
-        if len(set(characters_list)) == self.COLUMN_LINE_PARAGRAPH_SIZE:
-            input_character_set = characters_list
-            self.input_character_set = input_character_set
-            self.new_grid()
+            The box is held to the keys which are really in use: a repeated key is
+             dropped and anything past the eighth is refused, so a key read off the
+             grid always picks the cell it is written on
+        """
+        typed_characters = self.custom_character_entry.text().upper()
+        chosen_keys = []
+        for each_character in typed_characters:
+            if each_character not in chosen_keys and len(chosen_keys) < self.COLUMN_LINE_PARAGRAPH_SIZE:
+                chosen_keys.append(each_character)
+        if "".join(chosen_keys) != typed_characters:
+            self.custom_character_entry.setText("".join(chosen_keys))
+
+        # A set short of a key cannot index the grid, so the default keys stay in use
+        complete_set = len(chosen_keys) == self.COLUMN_LINE_PARAGRAPH_SIZE
+        self.use_key_set(chosen_keys if complete_set else self.DEFAULT_KEYS)
+        if complete_set:
             self.custom_character_entry.change_focus()
-        elif len(characters_list) > self.COLUMN_LINE_PARAGRAPH_SIZE:
-            # Trim the Entry widget at maximum the size constant
-            self.custom_character_entry.setText(self.custom_character_entry.text()[0:self.COLUMN_LINE_PARAGRAPH_SIZE])
-        elif len(set(characters_list)) != len(characters_list):
-            # Trim the Entry widget to unique characters
-            self.custom_character_entry.setText(self.custom_character_entry.text()[0:-1])
+
+    def use_key_set(self, key_set):
+        """
+            Take up a set of keys to index the grid with
+
+        Parameters
+        ----------
+        key_set : list
+            The keys the columns, lines and paragraphs of the grid are indexed by
+        """
+        if list(key_set) == list(self.input_character_set):
+            return
+        self.input_character_set = list(key_set)
+        self.new_grid()
 
     def randomize_character_set(self):
         """ Randomize the indexes of the grid independently of each other in the Table Selector tab"""
-        input_chars = self.input_character_set
-        random.shuffle(input_chars)
+        # Copied before shuffling, otherwise the set the user typed is permuted
+        #  in place and there is no longer a record of what was asked for
+        input_chars = list(self.input_character_set)
+        grid_random.shuffle(input_chars)
         self.input_set_caseless = input_chars + list([each_char.swapcase() for each_char in input_chars])
         column_char_set = input_chars.copy()
-        random.shuffle(column_char_set)
+        grid_random.shuffle(column_char_set)
         self.input_set_column = column_char_set + list([each_char.swapcase() for each_char in column_char_set])
         line_char_set = input_chars.copy()
-        random.shuffle(line_char_set)
+        grid_random.shuffle(line_char_set)
         self.input_set_line = line_char_set + list([each_char.swapcase() for each_char in line_char_set])
         paragraph_char_set = input_chars.copy()
-        random.shuffle(paragraph_char_set)
+        grid_random.shuffle(paragraph_char_set)
         self.input_set_paragraph = paragraph_char_set + list([each_char.swapcase() for each_char in paragraph_char_set])
         self.permutation_map.update({self.states[0]: self.input_set_caseless})
         self.permutation_map.update({self.states[1]: self.input_set_column})
@@ -1010,11 +1221,20 @@ class TableSelectorTab(BaseTab):
         event : 'QKeyEvent'
             It is the key pressed
         """
-        redo_set_keys = [Qt.Key_Escape, Qt.Key_Backspace, Qt.Key_Delete]
+        redo_set_keys = [Qt.Key_Escape, Qt.Key_Delete]
         if self.is_bip39_theme:
             # The grid does not support BIP39, so there is nothing on screen to select from
             return
-        if event.text() in self.input_set_caseless and self.current_state != self.states[-1]:
+        if event.key() == Qt.Key_Backspace:
+            self.go_back()
+
+        elif event.key() == Qt.Key_Left:
+            self.step_word(-1)
+
+        elif event.key() == Qt.Key_Right:
+            self.step_word(1)
+
+        elif event.text() in self.input_set_caseless and self.current_state != self.states[-1]:
 
             self.current_state = self.states[self.states.index(self.current_state) + 1]
             self.selected_indexes[self.current_state] = \
@@ -1023,12 +1243,14 @@ class TableSelectorTab(BaseTab):
 
             char_index = self.permutation_map[self.current_state].index(event.text())
             self.delineate_cells(char_index)
+            self.update_action_buttons()
 
         elif (event.key() in redo_set_keys) and self.current_state != self.states[0]:
             self.current_state = self.states[0]
             char_index = 0
             self.set_validation_colored_msg()
             self.delineate_cells(char_index)
+            self.update_action_buttons()
 
         elif (event.key() == Qt.Key_Enter or event.key() == Qt.Key_Return or event.key() == Qt.Key_Space) and \
                 self.current_state == self.states[-1]:
@@ -1048,7 +1270,7 @@ class TableSelectorTab(BaseTab):
     def reset_selection(self):
         """ Reset the variables and words which were selected so far in the Table Selector tab"""
         self.picked_passphrase = []
-        self.natural_word = self.parent.base_dict.natural_order[0]
+        self.set_word_cursor(0)
         self.current_state = self.states[0]
         self.valid_phrase = True
         self.set_validation_colored_msg()
@@ -1060,30 +1282,28 @@ class TableSelectorTab(BaseTab):
         [[each_label.setStyleSheet(self.defaultbg) for each_label in self.object_dict[each_syntactic_word]]
          for each_syntactic_word in self.object_dict.keys()]
         self.new_grid()
-        self.grayout_gen_button()
+        self.update_action_buttons()
 
-    def grayout_gen_button(self):
+    def update_action_buttons(self):
         """
-            Enable the Generate Phrase button when a whole phrase is picked
-            and disables the Generate Phrase button when the words picked does not form
-            the whole phrase in the Table Selector tab
+            Offer only the actions the phrase so far allows, in the Table Selector tab
+
+            Generate Phrase is offered once whole phrases are picked, and Back once
+             there is a word, or a part typed set of keys, left to give up
         """
         phrase_len = len(self.parent.base_dict.natural_order)
-        state = (len(self.picked_passphrase) % phrase_len == 0) and len(self.picked_passphrase) > 0
-        self.output_button.setEnabled(state)
+        complete = (len(self.picked_passphrase) % phrase_len == 0) and len(self.picked_passphrase) > 0
+        self.output_button.setEnabled(complete)
+        self.back_button.setEnabled(bool(self.picked_passphrase) or self.current_state != self.states[0])
 
     def output_phrases(self):
-        """ Print the phrases with the selected words in the Table Selector tab"""
+        """ Copy the phrases with the selected words in the Table Selector tab to clipboard"""
         phrase_len = len(self.parent.base_dict.natural_order)
         if (len(self.picked_passphrase) % phrase_len == 0) and len(self.picked_passphrase) > 0:
             output_phrases = ""
-            for i in range(len(self.picked_passphrase)):
-                print(self.picked_passphrase[i][0:2], end="")
-            print("")
             for i in range(len(self.picked_passphrase) // phrase_len):
                 phrase = " ".join(self.picked_passphrase[phrase_len * i:phrase_len * (i + 1)])
                 output_phrases += phrase + " "
-                print(phrase)
             QApplication.clipboard().setText(output_phrases)
 
     def check_word_list(self, word=None):
@@ -1099,7 +1319,9 @@ class TableSelectorTab(BaseTab):
             also not all steps are evaluated
             because the filling order is not the same as natural order
         """
-        checklist = self.picked_passphrase.copy()
+        # Up to where the grid stands, so a word being weighed in the middle of a
+        #  phrase is judged against the words leading it rather than the whole phrase
+        checklist = self.picked_passphrase[:self.word_cursor].copy()
         if word is not None:
             checklist.append(word)
         state = True
@@ -1247,23 +1469,82 @@ class TableSelectorTab(BaseTab):
         self.current_state = self.states[0]
         char_index = 0
         if word_index < len(words_list):
-            natural_order_list = self.parent.base_dict.natural_order
 
             self.select_base_theme.setEnabled(False)
-            self.picked_passphrase.append(words_list[word_index])
+            if self.word_cursor < len(self.picked_passphrase):
+                # Standing on a word already picked, so it is swapped for the new one
+                #  and the words after it are left as they are
+                self.picked_passphrase[self.word_cursor] = words_list[word_index]
+            else:
+                self.picked_passphrase.append(words_list[word_index])
             self.delineate_cells(char_index)
             [self.selected_indexes.update({each_key: a}) for each_key in self.selected_indexes.keys()]
 
-            self.natural_word = natural_order_list[natural_order_list.index(self.natural_word) + 1] if \
-                self.natural_word != natural_order_list[-1] else natural_order_list[0]
-
+            self.set_word_cursor(self.word_cursor + 1)
+            # Swapping a word in the middle can leave a word after it one its new
+            #  leader does not allow, so the whole phrase is weighed again
+            self.valid_phrase = self.phrase_follows_theme()
             self.new_grid()
             self.set_validation_colored_msg()
         else:
             self.delineate_cells(char_index)
             [self.selected_indexes.update({each_key: a}) for each_key in self.selected_indexes.keys()]
 
-        self.grayout_gen_button()
+        self.update_action_buttons()
+
+    def go_back(self):
+        """
+            Step back one move in the Table Selector tab
+
+            Backspace behaves as it does in a text box, taking back the smallest thing
+             behind it: a part typed set of keys is taken back first, so a mistyped key
+             costs one keystroke, and only when nothing is being typed does it give up
+             the word picked before it
+        """
+        if self.is_bip39_theme:
+            return
+        if self.current_state != self.states[0]:
+            self.cancel_selection()
+            return
+        self.undo_last_word()
+
+    def cancel_selection(self):
+        """ Take back the keys typed so far, leaving the words already picked alone"""
+        a = self.COLUMN_LINE_PARAGRAPH_SIZE
+        self.current_state = self.states[0]
+        [self.selected_indexes.update({each_key: a}) for each_key in self.selected_indexes.keys()]
+        self.set_validation_colored_msg()
+        self.delineate_cells(0)
+        self.update_action_buttons()
+
+    def undo_last_word(self) -> bool:
+        """
+            Give up the word picked last and put the grid back on the word it filled
+
+        Returns
+        -------
+        bool
+            Whether there was a word to give up
+        """
+        a = self.COLUMN_LINE_PARAGRAPH_SIZE
+        if not self.picked_passphrase:
+            return False
+        self.picked_passphrase.pop()
+        # Read from how many words are held rather than stepped backwards, so the grid
+        #  cannot be left out of step with the phrase however it was arrived at
+        self.set_word_cursor(len(self.picked_passphrase))
+        self.current_state = self.states[0]
+        [self.selected_indexes.update({each_key: a}) for each_key in self.selected_indexes.keys()]
+        if not self.picked_passphrase:
+            # Nothing is held any more, so the theme is free to be changed again
+            self.select_base_theme.setEnabled(True)
+        # The phrase was perhaps marked incompatible by the very word being given up,
+        #  so the warning is worked out again from the words which are left
+        self.valid_phrase = self.phrase_follows_theme()
+        self.new_grid()
+        self.check_word_list()
+        self.update_action_buttons()
+        return True
 
     def change_highlight_var(self):
         """ Switch the variable of the highlight checkbox """
@@ -1295,6 +1576,14 @@ class QtFormosa(QMainWindow):
 
         self.table_widget = FeaturesTabs(self)
         self.setCentralWidget(self.table_widget)
+
+        # Held on the window: a shortcut is offered before the key reaches whichever
+        #  widget has the focus, which is what lets these come round again at the ends
+        #  where the plain tab widget would simply stop at the first and the last
+        self.previous_tab_shortcut = QShortcut(QKeySequence("Ctrl+PgUp"), self)
+        self.previous_tab_shortcut.activated.connect(self.table_widget.show_previous_tab)
+        self.next_tab_shortcut = QShortcut(QKeySequence("Ctrl+PgDown"), self)
+        self.next_tab_shortcut.activated.connect(self.table_widget.show_next_tab)
 
     def sorted_themes(self) -> tuple[str]:
         """
@@ -1362,18 +1651,70 @@ class FeaturesTabs(QWidget):
         self.tab_control.addTab(self.theme_converter, self.tab01)
         self.tab_control.addTab(self.table_selector, self.tab02)
 
-        # Config the first tab due to be opening without being clicked
-        self.mnemonic_generator.init_configuration()
-        self.tab_control.tabBarClicked.connect(self.tab_clicked)
+        # Every tab is set up as the window is built. Only the first one used to be,
+        #  so the others opened blank, with unlabelled buttons and an empty theme list,
+        #  and filled themselves in at whatever moment they were first clicked
+        for each_index in range(self.tab_control.count()):
+            self.tab_control.widget(each_index).init_configuration()
+        # Answering the change of tab rather than the click on it, so a tab reached by
+        #  the keyboard is brought up to date the same as one reached by the tab bar
+        self.tab_control.currentChanged.connect(self.tab_shown)
 
         layout.addWidget(self.tab_control)
         self.setLayout(layout)
 
     def tab_clicked(self, tab_index):
-        base_theme = self.tab_control.currentWidget().base_theme
+        """
+            Show a given tab
+
+        Parameters
+        ----------
+        tab_index : int
+            The tab to show
+        """
         self.tab_control.setCurrentIndex(tab_index)
-        self.tab_control.currentWidget().init_configuration()
-        self.tab_control.currentWidget().set_base_theme(base_theme)
+        # Changing the index tells the tab itself, but says nothing when the tab asked
+        #  for is the one already showing, so it is told here as well
+        self.tab_shown(self.tab_control.currentIndex())
+
+    def tab_shown(self, tab_index):
+        """
+            Bring a tab up to date as it is shown, however it was reached
+
+        Parameters
+        ----------
+        tab_index : int
+            The tab being shown
+        """
+        tab = self.tab_control.widget(tab_index)
+        if tab is None:
+            return
+        tab.init_configuration()
+        # Read from the window, which every tab shares, rather than from the tab being
+        #  left, which holds no more than its own copy of it
+        tab.set_base_theme(self.parent.base_theme)
+
+    def show_next_tab(self):
+        """ Show the tab after this one, the first one following the last"""
+        self.step_tab(1)
+
+    def show_previous_tab(self):
+        """ Show the tab before this one, the last one preceding the first"""
+        self.step_tab(-1)
+
+    def step_tab(self, step: int):
+        """
+            Move a given number of tabs along, coming round again at either end
+
+        Parameters
+        ----------
+        step : int
+            How many tabs to move, negative to move backwards
+        """
+        tab_amount = self.tab_control.count()
+        if not tab_amount:
+            return
+        self.tab_clicked((self.tab_control.currentIndex() + step) % tab_amount)
 
 
 def main() -> int:
