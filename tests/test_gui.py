@@ -243,6 +243,153 @@ class GuiTest(unittest.TestCase):
             self.selector.new_grid()
         self.assertEqual(after_first_grid, label_amount())
 
+    def type_custom_keys(self, keys: str) -> None:
+        """ Type into the custom keys box one character at a time, as the widget does"""
+        for each_character in keys:
+            self.selector.custom_character_entry.keyPressEvent(
+                QKeyEvent(QEvent.KeyPress, ord(each_character.upper()), Qt.NoModifier, each_character))
+        self.application.processEvents()
+
+    def pick_cell_by_its_keys(self, cell_index: int) -> str:
+        """
+            Read the keys written on a cell, press them, and return the word picked
+
+        Parameters
+        ----------
+        cell_index : int
+            The cell of the grid to pick
+
+        Returns
+        -------
+        str
+            The word which was stored, or an empty string when nothing was picked
+        """
+        already_picked = len(self.selector.picked_passphrase)
+        written_keys = self.selector.current_words()[cell_index].text().split("-")[0]
+        for each_key in written_keys:
+            self.selector.keyReleaseEvent(
+                QKeyEvent(QEvent.KeyRelease, ord(each_key.upper()), Qt.NoModifier, each_key))
+        self.selector.keyReleaseEvent(
+            QKeyEvent(QEvent.KeyRelease, Qt.Key_Return, Qt.NoModifier, "\r"))
+        if len(self.selector.picked_passphrase) == already_picked:
+            return ""
+        return self.selector.picked_passphrase[-1]
+
+    def test_keys_written_on_a_cell_pick_that_cell(self) -> None:
+        """
+            The keys printed on a cell are the ones which pick it, whichever set is in use
+
+            A set holding a repeated key used to index the grid, so the keys read off a
+            cell stored some other word, quietly putting a word never chosen in the phrase
+        """
+        self.tabs.tab_clicked(2)
+        self.selector.set_base_theme("medieval_fantasy")
+        self.selector.use_custom_set.setChecked(True)
+        self.selector.enable_custom_keys_set()
+        for keys in ("", "QWERTYUI", "12345678", "QWERTYUIQ", "QWERTYUIO"):
+            self.selector.custom_character_entry.setText("")
+            self.selector.define_key_list()
+            self.type_custom_keys(keys)
+            with self.subTest(keys=keys or "default"):
+                self.assertEqual(self.selector.COLUMN_LINE_PARAGRAPH_SIZE,
+                                 len(self.selector.input_character_set))
+                self.assertEqual(len(set(self.selector.input_character_set)),
+                                 len(self.selector.input_character_set))
+                for cell_index in (0, 1, 9, 64, 100):
+                    # Reset first, it puts the grid back on the opening syntactic word
+                    self.selector.reset_selection()
+                    words = self.window.base_dict[self.selector.natural_word].total_words
+                    if cell_index >= len(self.selector.current_words()):
+                        continue
+                    self.assertEqual(words[cell_index], self.pick_cell_by_its_keys(cell_index))
+
+    def test_custom_keys_box_shows_the_keys_in_use(self) -> None:
+        """ What the box shows and what the grid is indexed by may never disagree"""
+        self.tabs.tab_clicked(2)
+        self.selector.set_base_theme("medieval_fantasy")
+        self.selector.use_custom_set.setChecked(True)
+        self.selector.enable_custom_keys_set()
+
+        self.type_custom_keys("QWERTYUI")
+        self.assertEqual("QWERTYUI", self.selector.custom_character_entry.text())
+        self.assertEqual(list("QWERTYUI"), self.selector.input_character_set)
+
+        # A repeated key, and a ninth one, are both refused rather than taken up
+        self.type_custom_keys("Q")
+        self.assertEqual("QWERTYUI", self.selector.custom_character_entry.text())
+        self.assertEqual(list("QWERTYUI"), self.selector.input_character_set)
+        self.type_custom_keys("O")
+        self.assertEqual("QWERTYUI", self.selector.custom_character_entry.text())
+        self.assertEqual(list("QWERTYUI"), self.selector.input_character_set)
+
+        # Unticking used to leave the custom keys in force with the box emptied
+        self.selector.use_custom_set.setChecked(False)
+        self.selector.enable_custom_keys_set()
+        self.assertEqual("", self.selector.custom_character_entry.text())
+        self.assertEqual(list(self.selector.DEFAULT_KEYS), self.selector.input_character_set)
+
+    def test_error_report_never_raises(self) -> None:
+        """
+            An error escaping the hook hands the process back to qFatal, which aborts
+            it with nothing in the terminal but whatever Qt happened to print last
+        """
+        log = Path(GUI_qt.ERROR_LOG)
+        before = log.stat().st_size if log.exists() else 0
+        try:
+            raise ValueError("a failure to report")
+        except ValueError:
+            details = sys.exc_info()
+        # Reported as though a window were already up, which skips the modal box
+        GUI_qt._reporting_error = True
+        try:
+            GUI_qt.excepthook(*details)
+        finally:
+            GUI_qt._reporting_error = False
+        self.assertTrue(log.exists())
+        written = log.read_text(encoding="utf-8")[before:]
+        self.assertIn("a failure to report", written)
+        self.assertIn("test_error_report_never_raises", written)
+
+    def test_error_report_survives_a_broken_reporter(self) -> None:
+        """ Even with the message box and the log unusable, the hook must not raise"""
+        original_box, original_log = GUI_qt.QMessageBox, GUI_qt.ERROR_LOG
+
+        class BrokenBox:
+            @staticmethod
+            def critical(*_args, **_kwargs):
+                raise RuntimeError("no window manager")
+
+        GUI_qt.QMessageBox = BrokenBox
+        GUI_qt.ERROR_LOG = Path("/nowhere/that/exists/formosa.log")
+        GUI_qt._last_reported = None
+        try:
+            raise KeyError("something to report")
+        except KeyError:
+            details = sys.exc_info()
+        try:
+            GUI_qt.excepthook(*details)
+        finally:
+            GUI_qt.QMessageBox, GUI_qt.ERROR_LOG = original_box, original_log
+            GUI_qt._last_reported = None
+
+    def test_phrase_amount_follows_a_theme_set_elsewhere(self) -> None:
+        """
+            The amount box used to keep offering the amounts of the theme it was set
+            for, so a count picked under BIP39 asked a Formosa theme for an entropy
+            far past the largest one there is
+        """
+        self.tabs.tab_clicked(0)
+        self.generator.set_base_theme("BIP39")
+        self.generator.select_phrases.setValue(24)
+
+        # changed from the Table Selector, without the Password Generator being told
+        self.selector.set_base_theme("medieval_fantasy")
+        self.assertEqual("medieval_fantasy", self.window.base_theme)
+
+        self.generator.generate_text()
+        self.assertTrue(self.generator.last_text)
+        self.assertLessEqual(self.generator.select_phrases.value(), 8)
+
     def test_converter_reports_bad_input_without_raising(self) -> None:
         """ Whatever is typed in the converter has to end up as a message, never as a crash"""
         self.tabs.tab_clicked(1)

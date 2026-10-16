@@ -7,9 +7,16 @@ import mnemonic
 import random
 import sys
 import traceback
+from pathlib import Path
 
 # This prevents IDE from creating a cache file
 sys.dont_write_bytecode = True
+
+ERROR_LOG = Path.home() / Path(".formosa_error.log")
+# An error raised while reporting an error must not start the reporting over again
+_reporting_error = False
+# The last error shown, so one which repeats is written down rather than shown again
+_last_reported = None
 
 
 def excepthook(exception_type, exception_value, exception_traceback):
@@ -19,11 +26,42 @@ def excepthook(exception_type, exception_value, exception_traceback):
         PyQt5 calls qFatal(), which aborts the process, whenever a Python exception
          propagates out of a signal handler. Installing a hook of our own keeps the
          window alive and tells the user what went wrong rather than vanishing on them.
+
+        Nothing here is allowed to raise. An error escaping this hook would hand the
+         process back to qFatal, which is the very abort the hook is here to prevent,
+         and would leave the terminal with no trace of what actually went wrong.
     """
-    traceback.print_exception(exception_type, exception_value, exception_traceback)
-    if QApplication.instance() is not None:
-        QMessageBox.critical(None, "Formosa", "Something went wrong:\n\n%s: %s"
-                             % (exception_type.__name__, exception_value))
+    global _reporting_error, _last_reported
+    report = "".join(traceback.format_exception(exception_type, exception_value, exception_traceback))
+    try:
+        sys.stderr.write(report)
+        sys.stderr.flush()
+    except Exception:
+        pass
+    try:
+        # Kept on disk as well, since the window is often started without a terminal
+        with open(ERROR_LOG, "a", encoding="utf-8") as error_file:
+            error_file.write(report)
+    except Exception:
+        pass
+    if _reporting_error:
+        # Already showing one, a second window on top of it would only hide the first
+        return
+    same_error = (exception_type.__name__, str(exception_value))
+    if same_error == _last_reported:
+        # A window manager resizing a window sends events in a stream, so the same
+        #  error can arrive over and over. It is written down, but shown only once
+        return
+    _last_reported = same_error
+    _reporting_error = True
+    try:
+        if QApplication.instance() is not None:
+            QMessageBox.critical(None, "Formosa", "Something went wrong:\n\n%s: %s\n\nWritten to %s"
+                                 % (exception_type.__name__, exception_value, ERROR_LOG))
+    except Exception:
+        pass
+    finally:
+        _reporting_error = False
 
 
 class BaseTab(QWidget):
@@ -182,13 +220,23 @@ class MnemonicGeneratorTab(BaseTab):
         self.config_phrases_selector()
         self.enable_checkboxes()
 
+    def phrases_range(self) -> tuple:
+        """
+            The least and the most phrases the theme in force is able to encode
+
+        Returns
+        -------
+        tuple
+            The smallest and the largest amount of phrases which can be generated
+        """
+        return (3, 24) if self.is_bip39_theme else (1, 8)
+
     def config_phrases_selector(self):
         """ Set the correct values to be selected while generating random phrases"""
-        min_phrases = step_phrases = default_value = 3 if self.is_bip39_theme else 1
-        max_phrases = 24 if self.is_bip39_theme else 8
+        min_phrases, max_phrases = self.phrases_range()
         self.select_phrases.setRange(min_phrases, max_phrases)
-        self.select_phrases.setSingleStep(step_phrases)
-        self.select_phrases.setValue(default_value)
+        self.select_phrases.setSingleStep(min_phrases)
+        self.select_phrases.setValue(min_phrases)
         self.select_phrases.setWrapping(True)
 
     def selected_phrases(self) -> int:
@@ -203,10 +251,16 @@ class MnemonicGeneratorTab(BaseTab):
         int
             The amount of phrases which the current theme is able to generate
         """
+        min_phrases, max_phrases = self.phrases_range()
+        if (self.select_phrases.minimum(), self.select_phrases.maximum()) != (min_phrases, max_phrases):
+            # The theme belongs to the window and can be changed from any tab, which
+            #  leaves this box offering the amounts of the theme it was last set for
+            self.select_phrases.setRange(min_phrases, max_phrases)
+            self.select_phrases.setSingleStep(min_phrases)
         phrase_size = self.select_phrases.value()
         if self.is_bip39_theme:
             # Every 3 BIP39 words encode 32 bits of entropy, so partial groups cannot be built
-            phrase_size = max(3, phrase_size - phrase_size % 3)
+            phrase_size = max(min_phrases, phrase_size - phrase_size % 3)
         if phrase_size != self.select_phrases.value():
             self.select_phrases.setValue(phrase_size)
         return phrase_size
@@ -431,6 +485,7 @@ class ThemeConverterTab(BaseTab):
 
 class TableSelectorTab(BaseTab):
     COLUMN_LINE_PARAGRAPH_SIZE = 8
+    DEFAULT_KEYS = ("A", "S", "D", "F", "J", "K", "L", ";")
     # The table is never scrolled, so the writing is what gives way when room runs short
     SMALLEST_GRID_FONT = 4
     LARGEST_GRID_FONT = 14
@@ -498,7 +553,7 @@ class TableSelectorTab(BaseTab):
         self.column_objects = []
         self.line_objects = []
         self.paragraph_objects = []
-        self.input_character_set = []
+        self.input_character_set = list(self.DEFAULT_KEYS)
         self.input_set_caseless = []
         self.input_set_column = []
         self.input_set_line = []
@@ -527,6 +582,7 @@ class TableSelectorTab(BaseTab):
         self.grid_holder.setLayout(self.grid_frame_selector)
         # The font size and word length the grid was last fitted with
         self.grid_fit = ()
+        self.resizing = False
         self.panel_max_width = 0
         self.panel_widgets = [self.reset_button, self.sel_valid_phrase_label,
                               self.highlight_checkbox, self.warning_label,
@@ -635,9 +691,16 @@ class TableSelectorTab(BaseTab):
         super().resizeEvent(event)
         # The base class lays the tab out while this one is still being built,
         #  so the panel is only measured once its widgets are in place
-        if getattr(self, "panel_widgets", None):
+        if not getattr(self, "panel_widgets", None) or self.resizing:
+            return
+        # Fitting the grid lays the tab out again, and a window manager resizing a
+        #  window sends a stream of these, so one pass is never re-entered by another
+        self.resizing = True
+        try:
             self.update_panel_width()
             self.fit_grid_to_view()
+        finally:
+            self.resizing = False
 
     def displayed_paragraphs(self, words_amount: int) -> int:
         """
@@ -846,30 +909,52 @@ class TableSelectorTab(BaseTab):
         else:
             self.custom_character_entry.setEnabled(False)
             self.custom_character_entry.setText("")
+            # Unticking used to leave the custom keys in force, with nothing on screen
+            #  saying so and the box emptied of the only record of what they were
+            self.input_character_set = list(self.DEFAULT_KEYS)
             self.new_grid()
 
     def define_key_list(self):
-        """ Set the keys used as index of the grid in the Table Selector tab"""
-        input_character_set = ["A", "S", "D", "F", "J", "K", "L", ";"]
-        characters_list = list(self.custom_character_entry.text().upper())
-        self.input_character_set = input_character_set
+        """
+            Set the keys used as index of the grid in the Table Selector tab
 
-        # Check whether the characters are all given and unique
-        if len(set(characters_list)) == self.COLUMN_LINE_PARAGRAPH_SIZE:
-            input_character_set = characters_list
-            self.input_character_set = input_character_set
-            self.new_grid()
+            The box is held to the keys which are really in use: a repeated key is
+             dropped and anything past the eighth is refused, so a key read off the
+             grid always picks the cell it is written on
+        """
+        typed_characters = self.custom_character_entry.text().upper()
+        chosen_keys = []
+        for each_character in typed_characters:
+            if each_character not in chosen_keys and len(chosen_keys) < self.COLUMN_LINE_PARAGRAPH_SIZE:
+                chosen_keys.append(each_character)
+        if "".join(chosen_keys) != typed_characters:
+            self.custom_character_entry.setText("".join(chosen_keys))
+
+        # A set short of a key cannot index the grid, so the default keys stay in use
+        complete_set = len(chosen_keys) == self.COLUMN_LINE_PARAGRAPH_SIZE
+        self.use_key_set(chosen_keys if complete_set else self.DEFAULT_KEYS)
+        if complete_set:
             self.custom_character_entry.change_focus()
-        elif len(characters_list) > self.COLUMN_LINE_PARAGRAPH_SIZE:
-            # Trim the Entry widget at maximum the size constant
-            self.custom_character_entry.setText(self.custom_character_entry.text()[0:self.COLUMN_LINE_PARAGRAPH_SIZE])
-        elif len(set(characters_list)) != len(characters_list):
-            # Trim the Entry widget to unique characters
-            self.custom_character_entry.setText(self.custom_character_entry.text()[0:-1])
+
+    def use_key_set(self, key_set):
+        """
+            Take up a set of keys to index the grid with
+
+        Parameters
+        ----------
+        key_set : list
+            The keys the columns, lines and paragraphs of the grid are indexed by
+        """
+        if list(key_set) == list(self.input_character_set):
+            return
+        self.input_character_set = list(key_set)
+        self.new_grid()
 
     def randomize_character_set(self):
         """ Randomize the indexes of the grid independently of each other in the Table Selector tab"""
-        input_chars = self.input_character_set
+        # Copied before shuffling, otherwise the set the user typed is permuted
+        #  in place and there is no longer a record of what was asked for
+        input_chars = list(self.input_character_set)
         random.shuffle(input_chars)
         self.input_set_caseless = input_chars + list([each_char.swapcase() for each_char in input_chars])
         column_char_set = input_chars.copy()
