@@ -17,6 +17,10 @@ dependencies:
     path: ..
   # Where Save writes: the app's documents folder.
   path_provider: ^2.1.0
+  # The Dragon Dice wizard: a mnemonic from real dice (the dragon-dice
+  # submodule).
+  dragon_dice_ui:
+    path: ../dragon-dice/ui
 
 dev_dependencies:
   flutter_test:

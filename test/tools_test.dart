@@ -74,4 +74,15 @@ void main() {
       }
     });
   });
+
+  test('the terminal: a mnemonic from a Dragon Dice digest', () {
+    const String digest =
+        'c27639eb557b8258948d9cd8a65c706688e8feccc4f662252c186225a7c79cf7'
+        '0824920ae00ee5ba62bc3065212edf12c063d97b8c55aae977387eb2ed0d10c0';
+    final ProcessResult r = Process.runSync(
+        Platform.resolvedExecutable, <String>['run', 'bin/formosa.dart', 'sci-fi', '32', '--digest', digest]);
+    expect(r.exitCode, 0, reason: '${r.stderr}');
+    expect((r.stdout as String).trim(),
+        'enshdarejumo\nengineer shut_down dark_matter recorder jupiterian mothership');
+  });
 }

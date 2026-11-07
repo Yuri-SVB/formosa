@@ -1,6 +1,9 @@
 import 'dart:io';
+import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
+import 'package:dragon_dice_ui/dragon_dice_ui.dart'
+    show DiceRolls, DragonDiceWizard;
 import 'package:flutter/services.dart';
 import 'package:formosa/formosa.dart' show Mnemonic;
 import 'package:path_provider/path_provider.dart';
@@ -11,8 +14,16 @@ import 'generator.dart';
 /// mnemonics in it are secrets.
 const String kOutputFile = 'formosa-output.txt';
 
-/// The Password Generator: mnemonics of the chosen size, their passwords
-/// tweaked if asked, gathered in one text.
+/// The Dragon Dice wizard's dialog: as large as this, at most.
+const double _kDiceWidth = 960;
+const double _kDiceHeight = 620;
+
+/// Bits per byte.
+const int _kByteBits = 8;
+
+/// The Password Generator: mnemonics of the chosen size — from the system's
+/// randomness, or from real dice (Dragon Dice) — their passwords tweaked if
+/// asked, gathered in one text.
 class GeneratorTab extends StatefulWidget {
   const GeneratorTab({super.key, required this.mnemonic});
 
@@ -66,6 +77,44 @@ class _GeneratorTabState extends State<GeneratorTab> {
     });
   }
 
+  /// A mnemonic from real dice: the first bits of the digest of the rolls
+  /// (dragon-dice/doc/FORMAT.md), the dice carrying the target first.
+  Future<void> _rollDice() async {
+    final int strength = strengthOf(_phrases, bip39: _bip39);
+    final Size screen = MediaQuery.sizeOf(context);
+    DiceRolls? rolled;
+    await showDialog<void>(
+      context: context,
+      barrierDismissible: false,
+      builder: (BuildContext ctx) => Dialog(
+        child: SizedBox(
+          width: math.min(_kDiceWidth, screen.width),
+          height: math.min(_kDiceHeight, screen.height),
+          child: DragonDiceWizard(
+            targetBits: diceTargetBits(strength).toDouble(),
+            purpose: 'A ${widget.mnemonic.name} mnemonic of $strength bits',
+            systemRandomByDefault: true,
+            onDone: (DiceRolls r) {
+              rolled = r;
+              Navigator.of(ctx).pop();
+            },
+            onCancel: () => Navigator.of(ctx).pop(),
+          ),
+        ),
+      ),
+    );
+    final DiceRolls? r = rolled;
+    if (r == null) return;
+    final Uint8List digest = r.digest();
+    r.wipe();
+    final Uint8List entropy =
+        Uint8List.fromList(digest.sublist(0, strength ~/ _kByteBits));
+    digest.fillRange(0, digest.length, 0);
+    final String words = widget.mnemonic.toMnemonic(entropy);
+    entropy.fillRange(0, entropy.length, 0);
+    if (mounted) _append(words);
+  }
+
   void _toggle(Tweak t, bool on) {
     setState(() {
       on ? _tweaks.add(t) : _tweaks.remove(t);
@@ -110,6 +159,11 @@ class _GeneratorTabState extends State<GeneratorTab> {
               crossAxisAlignment: CrossAxisAlignment.stretch,
               children: <Widget>[
                 FilledButton(onPressed: _run, child: const Text('Run!')),
+                const SizedBox(height: 8),
+                FilledButton.tonal(
+                  onPressed: _rollDice,
+                  child: const Text('Roll dice'),
+                ),
                 const SizedBox(height: 8),
                 OutlinedButton(
                   onPressed: () {

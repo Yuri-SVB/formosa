@@ -1,6 +1,8 @@
 import 'dart:io';
 import 'dart:math' as math;
 
+import 'package:dragon_dice_ui/dragon_dice_ui.dart'
+    show Die, DieRolls, DiceRolls;
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -49,6 +51,13 @@ void main() {
       g.apply(Tweak.upper, on: false);
       g.apply(Tweak.number, on: false);
       expect(g.text.split('\n'), before);
+    });
+
+    test('the dice carry the strength, and 8 more bits below 128', () {
+      expect(diceTargetBits(32), 40);
+      expect(diceTargetBits(96), 104);
+      expect(diceTargetBits(128), 128);
+      expect(diceTargetBits(256), 256);
     });
 
     test('a password line is found after mnemonics of any size', () {
@@ -249,6 +258,37 @@ void main() {
           tester.widget<TextField>(find.byType(TextField).last);
       final List<String> lines = box.controller!.text.trim().split('\n');
       expect(themes['BIP39'].check(lines.skip(1).join(' ')), isTrue);
+    });
+
+    testWidgets('Roll dice: the mnemonic of the rolls\' digest',
+        (WidgetTester tester) async {
+      await open(tester, size: const Size(1200, 800));
+      await tester.tap(find.text('Roll dice'));
+      await tester.pumpAndSettle();
+      expect(find.textContaining('Target 40 bits'), findsOneWidget);
+      // System randomness off, so the digest is the rolls' alone.
+      await tester.tap(find.text('System randomness'));
+      await tester.pump();
+      await tester.tap(find.text('D20'));
+      await tester.pump();
+      final Finder rolls = find
+          .descendant(of: find.byType(Dialog), matching: find.byType(TextField))
+          .last;
+      await tester.enterText(rolls, '1 2 3 4 5 6 7 8 9 10');
+      await tester.testTextInput.receiveAction(TextInputAction.done);
+      await tester.pump();
+      await tester.enterText(rolls, '');
+      await tester.testTextInput.receiveAction(TextInputAction.done);
+      await tester.pumpAndSettle();
+      expect(find.byType(Dialog), findsNothing);
+      final List<int> digest = DiceRolls(<DieRolls>[
+        DieRolls(Die(20), <int>[1, 2, 3, 4, 5, 6, 7, 8, 9, 10]),
+      ]).digest();
+      final String expected = themes['BIP39']
+          .formatMnemonic(themes['BIP39'].toMnemonic(digest.sublist(0, 4)));
+      final TextField box =
+          tester.widget<TextField>(find.byType(TextField).last);
+      expect(box.controller!.text.trim(), expected);
     });
 
     testWidgets('the window fits a small screen', (WidgetTester tester) async {

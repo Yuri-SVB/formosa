@@ -44,10 +44,13 @@ frozen vectors ([vectors.json](vectors.json)), so they write the same mnemonics
 and derive the same seeds.
 
 ```console
-git clone https://github.com/Yuri-SVB/formosa.git
+git clone --recurse-submodules https://github.com/Yuri-SVB/formosa.git
 cd formosa
 dart pub get
 ```
+
+[Dragon Dice](dragon-dice) (a submodule) gives mnemonics from real dice,
+anyone can audit, in the app and in the terminal.
 
 ### The app
 
@@ -58,6 +61,12 @@ flutter run -d linux        # or macos, windows, android, ios
 
 Three tabs: the **Password Generator**, the **Theme Converter** and the
 **Table Selector**. Ctrl+PageUp and Ctrl+PageDown cycle them.
+
+In the Password Generator, **Roll dice** opens the Dragon Dice wizard: the
+mnemonic is the first bits of the digest of your rolls, which carry its
+strength (8 bits more below 128, as a short output cut from a digest can be
+tabulated). The mouse, the camera and the system's randomness can be mixed
+in.
 
 ### The terminal
 
@@ -77,7 +86,10 @@ Change the arguments "theme" and "cryptographic_strength" accordingly;
 
 The cryptographic strength argument refers to how hard it is to crack the password by brute-force. It is a multiple of 32 between 32 and 256. Thumb rule is 64 is good for non critical password and 128 is good enough for most applications. In fact 128 bits of entropy is, in fact, the most used standard for cryptocurrency seeds, as deemed adequate by the author. From 160 to 256 is tin-foil hat territory.
 
-`dart run formosa HEX` gives the BIP39 mnemonic of the entropy HEX.
+`dart run formosa HEX` gives the BIP39 mnemonic of the entropy HEX, and
+`dart run formosa theme cryptographic_strength --digest HEX` the mnemonic of a
+Dragon Dice digest's first bits (`dart run dragon_dice hash` in
+`dragon-dice/` gives one).
 
 Below are examples. Users are advised **not** to utilize any of them as passwords
 or seeds since they are published:

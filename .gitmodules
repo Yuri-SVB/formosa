@@ -1,0 +1,3 @@
+[submodule "dragon-dice"]
+	path = dragon-dice
+	url = git@github.com:yuri-svb/dragon-dice.git

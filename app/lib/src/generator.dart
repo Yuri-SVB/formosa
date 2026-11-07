@@ -53,6 +53,16 @@ int strengthOf(int phrases, {required bool bip39}) => bip39
     ? kBitsPerPhrase * phrases ~/ kBip39MinPhrases
     : kBitsPerPhrase * phrases;
 
+/// Strengths below this can be tabulated once cut from a digest, so the dice
+/// carry [kDiceMarginBits] more (dragon-dice/doc/FORMAT.md, "From the
+/// digest").
+const int kUntabulableStrength = 128;
+const int kDiceMarginBits = 8;
+
+/// Bits the dice must carry for a mnemonic of [strength] bits.
+int diceTargetBits(int strength) =>
+    strength < kUntabulableStrength ? strength + kDiceMarginBits : strength;
+
 /// The generator's text.
 class GeneratorText {
   /// Everything generated, as shown and copied.

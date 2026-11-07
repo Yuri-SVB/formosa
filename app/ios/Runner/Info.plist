@@ -6,6 +6,8 @@
 	<true/>
 	<key>CFBundleDevelopmentRegion</key>
 	<string>$(DEVELOPMENT_LANGUAGE)</string>
+	<key>NSCameraUsageDescription</key>
+	<string>Dragon Dice can mix the camera's noise into your rolls. Frames are reduced to a digest and never kept.</string>
 	<key>CFBundleDisplayName</key>
 	<string>Formosa App</string>
 	<key>CFBundleExecutable</key>
