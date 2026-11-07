@@ -36,37 +36,37 @@ It is intuitively easier to recall meaningful phrases than it is to remember a s
 
 ## Installation
 
-### For tech-savvy people
-Clone the release branch by running the following command on the terminal:
+Formosa is written in Dart: a library, a terminal app, theme tools, and an app
+for every platform Flutter runs on (Linux, macOS, Windows, Android, iOS). The
+BIP's reference implementation, in Python, lives in [python/](python/README.md).
+Both share the themes ([themes/](themes)) and are checked against the same
+frozen vectors ([vectors.json](vectors.json)), so they write the same mnemonics
+and derive the same seeds.
+
 ```console
 git clone https://github.com/Yuri-SVB/formosa.git
-```
-#### To run graphical user interface on your own environment
-1. Change directory to the project directory that has just been cloned
-```console
 cd formosa
-```
-2. Build virtual environment (this command only has to be entered upon cloning):
-```console
-source venv_setup.sh
-```
-3. Activate virtual environment:
-```console
-source envformosa/bin/activate
-```
-4. Run the GUI_qt.py file on Python
-```console
-python3 src/mnemonic/GUI_qt.py
+dart pub get
 ```
 
-#### To run source code on terminal
-1. Repeat steps from 1, 2 and 3 of instructions to run in GUI;
-2. On Python, run the following command:
+### The app
 
 ```console
-python3 mnemonic.py theme cryptographic_strength
+cd app
+flutter run -d linux        # or macos, windows, android, ios
 ```
-Change the arguments "theme" and "cryptographic_strength" accordingly. Available themes include:
+
+Three tabs: the **Password Generator**, the **Theme Converter** and the
+**Table Selector**. Ctrl+PageUp and Ctrl+PageDown cycle them.
+
+### The terminal
+
+```console
+dart run formosa theme cryptographic_strength
+```
+
+Change the arguments "theme" and "cryptographic_strength" accordingly;
+`dart run formosa themes` lists the themes. Available themes include:
 
 - medieval_fantasy
 - medieval_fantasy_light
@@ -77,12 +77,14 @@ Change the arguments "theme" and "cryptographic_strength" accordingly. Available
 
 The cryptographic strength argument refers to how hard it is to crack the password by brute-force. It is a multiple of 32 between 32 and 256. Thumb rule is 64 is good for non critical password and 128 is good enough for most applications. In fact 128 bits of entropy is, in fact, the most used standard for cryptocurrency seeds, as deemed adequate by the author. From 160 to 256 is tin-foil hat territory.
 
+`dart run formosa HEX` gives the BIP39 mnemonic of the entropy HEX.
+
 Below are examples. Users are advised **not** to utilize any of them as passwords
 or seeds since they are published:
 
 **Command**
 ```console
-python3 mnemonic.py sci-fi 160
+dart run formosa sci-fi 160
 ```
 **Output**
 ```
@@ -96,7 +98,7 @@ green_man operate ion emitter overmind goldilock_zone
 
 **Command**
 ```console
-python3 mnemonic.py copy_left 96
+dart run formosa copy_left 96
 ```
 
 **Output**
@@ -107,47 +109,26 @@ robinson_crusoe reach crystal pickaxe eloi graveyard
 legolas pull icy gem hades kitchen
 ```
 
+### Theme tools
 
-#### To find executables in the source code
-1. In your local repo, navigate to the "Download Apps" folder
-2. Choose your operating system
-3. Choose the version of your operating system
-4. Run the executable
+- `dart run tool/theme_handler.dart` builds `themes/edit/main.json` from
+  `Data.json` (the structure) and `Data.txt` (the matrices); with arguments, it
+  swaps a word in a theme.
+- `dart run tool/verify_theme.dart` checks that every theme follows the
+  standard.
 
+Both match the Python tools' output byte for byte.
 
-#### To build your own executable on Windows (may not work on certain systems)
-1. Make sure you have Python, Tkinter, base58, and PyInstaller installed.
-2. Navigate to the "mnemonic" folder
-3. Enter the following command:
-
-```console
-pyinstaller --paths C:\Windows\System32\downlevel --paths C:\Windows\SysWOW64\downlevel --onefile -w --add-data 'themes\copy_left\;themes\copy_left\' --add-data 'themes\finances\;themes\finances\' --add-data 'themes\role_play\;themes\role_play\' --add-data 'themes\sci-fi\;themes\sci-fi\' --add-data 'themes\tourism\*;themes\tourism\' GUI_qt.py
-```
-If the former doesn't work, try this:
+### Tests
 
 ```console
-python -m PyInstaller --paths C:\Windows\System32\downlevel --paths C:\Windows\SysWOW64\downlevel --onefile -w --add-data 'themes\copy_left\;themes\copy_left\' --add-data 'themes\finances\;themes\finances\' --add-data 'themes\role_play\;themes\role_play\' --add-data 'themes\sci-fi\;themes\sci-fi\' --add-data 'themes\tourism\*;themes\tourism\' GUI_qt.py
+dart test                   # the library, the vectors, the tools
+cd app && flutter test      # the app
 ```
-4. Two new directories will be created: build and dist. The build folder can be deleted, while dist will contain your executable.
 
-**Note:** the executable will only work on computers with the same operating system and version as the one it was built in.
+### Executables
 
-#### To build your own executable on Linux (may not work on certain systems)
-1. Make sure you have Python, Tkinter, base58, and PyInstaller installed.
-2. Navigate to the "mnemonic" folder
-3. Enter the following command:
-```
-python3 -m PyInstaller --onefile \
-  --add-data 'themes/copy_left/*:themes/copy_left/' \
-  --add-data 'themes/finances/*:themes/finances/' \
-  --add-data 'themes/role_play/*:themes/role_play/' \
-  --add-data 'themes/sci-fi/*:themes/sci-fi/' \
-  --add-data 'themes/tourism/*:themes/tourism/' \
-  -w GUI_qt.py
-```
-4. Two new directories will be created: build and dist. The build folder can be deleted, while dist will contain your executable.
-
-**Note:** the executable will only work on computers with the same operating system and version as the one it was built in.
+`flutter build linux` (or `macos`, `windows`, `apk`, `ios`) in `app/`.
 
 ## How to use the passphrases
 After running the program, you will have a strong password and a number of strings to help you remember it. To turn them into actual phrases, you will have to add the necessary prepositions and conjugate the verbs accordingly.

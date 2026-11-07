@@ -1,0 +1,27 @@
+name: formosa_app
+description: >-
+  Formosa's app: the Password Generator, the Theme Converter and the Table
+  Selector, on every platform Flutter runs on.
+publish_to: none
+version: 0.1.0+1
+
+environment:
+  sdk: ">=3.3.0 <4.0.0"
+  flutter: ">=3.22.0"
+
+dependencies:
+  flutter:
+    sdk: flutter
+  # The library, and its themes as assets (packages/formosa/themes/).
+  formosa:
+    path: ..
+  # Where Save writes: the app's documents folder.
+  path_provider: ^2.1.0
+
+dev_dependencies:
+  flutter_test:
+    sdk: flutter
+  flutter_lints: ^4.0.0
+
+flutter:
+  uses-material-design: true

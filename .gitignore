@@ -19,16 +19,20 @@ venvformosa/*
 **.pyc
 
 # edition folder
-tools/edit_themes/*
+themes/edit/*
 
 # secret themes
-src/mnemonic/themes/xxx.json
-src/mnemonic/themes/templates/xxx.ods
-src/mnemonic/themes/templates/xxx.py
+themes/xxx.json
+themes/templates/xxx.ods
+themes/templates/xxx.py
 
 # generated secrets - the Save button writes seed phrases here in plain text
 output.txt
 .formosa_error.log
+
+# Dart and Flutter
+.dart_tool/
+pubspec.lock
 
 # IDE folder
 .idea/

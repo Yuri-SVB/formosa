@@ -206,7 +206,7 @@ remains available and structurally valid. Users with proper training in security
 protocols who understand these risks may benefit from custom themes through higher
 memorization efficiency or an additional layer of obscurity.
 
-* [[https://github.com/Yuri-SVB/formosa/tree/master/src/mnemonic/themes|Standard Formosa Themes]]
+* [[https://github.com/Yuri-SVB/formosa/tree/master/themes|Standard Formosa Themes]]
 
 ==Test vectors==
 
@@ -222,3 +222,6 @@ https://github.com/Yuri-SVB/formosa/blob/master/vectors.json
 Reference implementation including themes is available from
 
 https://github.com/Yuri-SVB/formosa
+
+in Python (python/), with a Dart implementation (library, terminal and app)
+at the root of the same repository, checked against the same test vectors.
