@@ -18,8 +18,12 @@ venvformosa/*
 **/__pycache__/*
 **.pyc
 
-# edition folder
+# edition folder: work files stay local; the authoring inputs and the theme
+# built from them are tracked (the theme tools and their tests read them)
 themes/edit/*
+!themes/edit/Data.json
+!themes/edit/Data.txt
+!themes/edit/main.json
 
 # secret themes
 themes/xxx.json
