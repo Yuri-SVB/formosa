@@ -7,11 +7,12 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:formosa/formosa.dart' as formosa;
+import 'package:formosa/formosa.dart'
+    show TableSelector, SelectorStep, Validity, kDefaultKeys;
 import 'package:formosa/io.dart';
 import 'package:formosa_app/main.dart';
 import 'package:formosa_app/src/converter_tab.dart';
 import 'package:formosa_app/src/generator.dart';
-import 'package:formosa_app/src/table_selector.dart';
 import 'package:formosa_app/src/themes.dart';
 
 void main() {

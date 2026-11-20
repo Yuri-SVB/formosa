@@ -15,6 +15,9 @@ dependencies:
   # The library, and its themes as assets (packages/formosa/themes/).
   formosa:
     path: ..
+  # Formosa's widgets: the Table Selector.
+  formosa_ui:
+    path: ../ui
   # Where Save writes: the app's documents folder.
   path_provider: ^2.1.0
   # The Dragon Dice wizard: a mnemonic from real dice (the dragon-dice

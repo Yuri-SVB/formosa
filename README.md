@@ -62,6 +62,12 @@ flutter run -d linux        # or macos, windows, android, ios
 Three tabs: the **Password Generator**, the **Theme Converter** and the
 **Table Selector**. Ctrl+PageUp and Ctrl+PageDown cycle them.
 
+The Table Selector (Moon Cake) is the input against shoulder surfing: each
+word is picked by three keys from a grid whose keys are shuffled anew for
+every word. Its logic is the library's (`TableSelector`) and its widget is in
+`ui/` (the `formosa_ui` package), which needs no Dragon Dice: other apps embed
+it as it is.
+
 In the Password Generator, **Roll dice** opens the Dragon Dice wizard: the
 mnemonic is the first bits of the digest of your rolls, which carry its
 strength (8 bits more below 128, as a short output cut from a digest can be
@@ -135,6 +141,7 @@ Both match the Python tools' output byte for byte.
 
 ```console
 dart test                   # the library, the vectors, the tools
+cd ui && flutter test       # the widgets (the Table Selector)
 cd app && flutter test      # the app
 ```
 
@@ -185,6 +192,12 @@ An input **array** of 32 ⋅ n bits is hashed by sha256; from the resulting dige
 At each sentence, each **clause syntactic element** is determined in a fixed order for each given **theme**. The first **chunk** specifies an element from an unrestricted list of possibilities. From the second **chunk** onwards, each list of possible **terms** is given by one previously determined **term**.
 
 For example, say the first chunk determines the verb and the second chunk determines the subject; if the first chunk maps to "to meow", the second chunk elicits another term from a sublist of subjects semantically fitting to this verb like felines or "cat people". Likewise, we could have a subject like "Snow White" determining a sublist of possible objects including "apple", "poison", "magic mirror", etc. Note that these sublists are pre-defined for each theme and **not** created during runtime.
+
+### Raw sentences: no checksum
+
+A second mode drops the checksum: a **raw sentence** is 33 bits of entropy and nothing else — one themed sentence, or three BIP39 words (`Mnemonic.generateRaw`, `toRawSentence`, `rawBits`). Each sentence stands on its own, so sentences can be generated, learned, added and retired one at a time.
+
+**No checksum means no typo detection.** A typo that lands on another valid word gives another valid sentence, and nothing tells you. Raw sentences are meant for schemes where something else checks the whole — a key that opens a vault or does not. For a password you type, use the checksummed mnemonics above.
 
 **⚡ Support:** [github.com/Yuri-SVB/SUPPORT](https://github.com/Yuri-SVB/SUPPORT) — free software, nothing gated.
 

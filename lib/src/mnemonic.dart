@@ -15,6 +15,11 @@ const int kMinStrength = 32;
 const int kMaxStrength = 256;
 const int kStrengthStep = 32;
 
+/// Bits a **raw sentence** carries, every one of them entropy: no checksum
+/// bit, so a typo that lands on another valid word goes undetected. One
+/// themed sentence, or three BIP39 words.
+const int kRawSentenceBits = 33;
+
 /// Checksum: one bit per [kStrengthStep] bits of entropy.
 const int _kBitsPerChecksumBit = kStrengthStep + 1;
 
@@ -62,6 +67,63 @@ class Mnemonic {
     final String out = toMnemonic(data);
     data.fillRange(0, data.length, 0);
     return out;
+  }
+
+  // --- Raw sentences: no checksum ------------------------------------------
+  //
+  // A raw sentence is [kRawSentenceBits] bits of entropy and nothing else —
+  // one themed sentence, or three BIP39 words. Each stands on its own, so
+  // sentences can be generated, learned, added and retired one at a time;
+  // but without a checksum bit nothing catches a typo that makes another
+  // valid sentence. Use them where something else checks the whole (a key
+  // that opens or not); for a password, use [generate].
+
+  /// Phrases (themed sentences, or BIP39 words) in a raw sentence.
+  int get phrasesPerRawSentence {
+    final int bpp = theme.bitsPerPhrase;
+    if (kRawSentenceBits % bpp != 0) {
+      throw StateError('Theme $name cannot carry raw sentences: '
+          '$kRawSentenceBits is not a multiple of its $bpp bits per phrase.');
+    }
+    return kRawSentenceBits ~/ bpp;
+  }
+
+  /// Words in a raw sentence.
+  int get wordsPerRawSentence => phrasesPerRawSentence * theme.wordsPerPhrase;
+
+  /// A new raw sentence: [kRawSentenceBits] bits from [random] (the system's
+  /// secure generator by default), no checksum.
+  String generateRaw({math.Random? random}) {
+    final math.Random rng = random ?? math.Random.secure();
+    final List<int> bits = <int>[
+      for (int i = 0; i < kRawSentenceBits; i++) rng.nextInt(2),
+    ];
+    final String out = toRawSentence(bits);
+    bits.fillRange(0, bits.length, 0);
+    return out;
+  }
+
+  /// The raw sentence of [bits]: exactly [kRawSentenceBits] of them, each 0 or
+  /// 1, all entropy.
+  String toRawSentence(List<int> bits) {
+    if (bits.length != kRawSentenceBits || bits.any((int b) => b & ~1 != 0)) {
+      throw FormatException(
+          'A raw sentence takes $kRawSentenceBits bits, each 0 or 1.');
+    }
+    phrasesPerRawSentence; // throws for a theme that cannot carry one
+    return theme.sentencesFromBits(bits).join(delimiter);
+  }
+
+  /// The [kRawSentenceBits] bits of the raw sentence [words]. Throws a
+  /// [FormatException] when they are not one whole raw sentence of this
+  /// theme; there is no checksum to fail.
+  List<int> rawBits(Object words) {
+    final List<String> list = Theme.normalizeMnemonic(words);
+    if (list.length != wordsPerRawSentence) {
+      throw FormatException('A raw sentence of $name has '
+          '$wordsPerRawSentence words, but this has ${list.length}.');
+    }
+    return _indexBits(list);
   }
 
   /// Throws an [ArgumentError] unless [strength] can be encoded.

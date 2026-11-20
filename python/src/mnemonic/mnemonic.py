@@ -777,6 +777,58 @@ class Mnemonic(object):
             )
         return self.to_mnemonic(os.urandom(strength // 8))
 
+    # Raw sentences: no checksum. A raw sentence is RAW_SENTENCE_BITS bits of
+    # entropy and nothing else: one themed sentence, or three BIP39 words. Each
+    # stands on its own, so sentences can be generated, learned, added and
+    # retired one at a time; but without a checksum bit nothing catches a typo
+    # that makes another valid sentence. Use them where something else checks
+    # the whole (a key that opens or not); for a password, use generate().
+    RAW_SENTENCE_BITS = 33
+
+    @property
+    def phrases_per_raw_sentence(self) -> int:
+        """Phrases (themed sentences, or BIP39 words) in a raw sentence."""
+        bpp = self.words_dictionary.bits_per_phrase
+        if self.RAW_SENTENCE_BITS % bpp != 0:
+            raise ValueError("This theme cannot carry raw sentences: %d is not a "
+                             "multiple of its %d bits per phrase."
+                             % (self.RAW_SENTENCE_BITS, bpp))
+        return self.RAW_SENTENCE_BITS // bpp
+
+    @property
+    def words_per_raw_sentence(self) -> int:
+        """Words in a raw sentence."""
+        return self.phrases_per_raw_sentence * self.words_dictionary.words_per_phrase
+
+    def generate_raw(self) -> str:
+        """A new raw sentence: RAW_SENTENCE_BITS random bits, no checksum."""
+        bits = bin(int.from_bytes(os.urandom(5), "big"))[2:].zfill(40)
+        return self.to_raw_sentence(bits[: self.RAW_SENTENCE_BITS])
+
+    def to_raw_sentence(self, bits: str) -> str:
+        """The raw sentence of bits, a string of exactly RAW_SENTENCE_BITS '0's
+        and '1's, all entropy."""
+        if len(bits) != self.RAW_SENTENCE_BITS or set(bits) - {"0", "1"}:
+            raise ValueError("A raw sentence takes %d bits, each 0 or 1."
+                             % self.RAW_SENTENCE_BITS)
+        self.phrases_per_raw_sentence  # raises for a theme that cannot carry one
+        return self.delimiter.join(self.words_dictionary.get_sentences_from_bits(bits))
+
+    def raw_bits(self, words: Union[str, list[str]]) -> str:
+        """The RAW_SENTENCE_BITS bits of the raw sentence words, as a string of
+        '0's and '1's. Raises ValueError when they are not one whole raw
+        sentence of this theme; there is no checksum to fail."""
+        if not isinstance(words, list):
+            words = words.split(" ")
+        if len(words) != self.words_per_raw_sentence:
+            raise ValueError("A raw sentence has %d words, but this has %d."
+                             % (self.words_per_raw_sentence, len(words)))
+        words_dict = self.words_dictionary
+        return "".join(
+            bin(i)[2:].zfill(n) for i, n in zip(
+                words_dict.get_phrase_indexes(words),
+                words_dict.bits_fill_sequence * self.phrases_per_raw_sentence))
+
     @staticmethod
     def first_letters(word: str, letters_amount: int) -> str:
         """

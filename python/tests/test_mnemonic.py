@@ -129,6 +129,47 @@ class MnemonicTest(unittest.TestCase):
         )
 
 
+class RawSentenceTest(unittest.TestCase):
+    # The same bits give the same raw sentences as the Dart implementation.
+    BITS = "".join("1" if i % 3 == 0 else "0" for i in range(33))
+    SHARED = {
+        "farm_animals": "defensive dobermann_dog meet coward dachshund_dog cafe",
+        "BIP39": "myself empty cause",
+    }
+
+    def test_shared_with_dart(self) -> None:
+        for theme, sentence in self.SHARED.items():
+            mnemo = Mnemonic(theme)
+            self.assertEqual(mnemo.to_raw_sentence(self.BITS), sentence)
+            self.assertEqual(mnemo.raw_bits(sentence), self.BITS)
+
+    def test_every_theme_round_trips(self) -> None:
+        rng = random.Random(33)
+        for theme in Mnemonic.find_themes():
+            mnemo = Mnemonic(theme)
+            for _ in range(10):
+                bits = "".join(rng.choice("01") for _ in range(33))
+                sentence = mnemo.to_raw_sentence(bits)
+                self.assertEqual(len(sentence.split(" ")), mnemo.words_per_raw_sentence)
+                self.assertEqual(mnemo.raw_bits(sentence), bits)
+
+    def test_no_checksum(self) -> None:
+        mnemo = Mnemonic("farm_animals")
+        for v in "01":
+            self.assertEqual(mnemo.raw_bits(mnemo.to_raw_sentence(v * 33)), v * 33)
+
+    def test_refused(self) -> None:
+        mnemo = Mnemonic("sci-fi")
+        sentence = mnemo.generate_raw()
+        self.assertEqual(len(mnemo.raw_bits(sentence)), 33)
+        with self.assertRaises(ValueError):
+            mnemo.raw_bits(sentence + " " + sentence.split(" ")[0])
+        with self.assertRaises(ValueError):
+            mnemo.to_raw_sentence("0" * 32)
+        with self.assertRaises(ValueError):
+            mnemo.to_raw_sentence("2" * 33)
+
+
 class FormosaRegressionTest(unittest.TestCase):
     """ Cover the failures which used to reach the user as a wrong result or a crash"""
 

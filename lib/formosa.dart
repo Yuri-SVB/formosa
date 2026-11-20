@@ -5,5 +5,6 @@ library;
 
 export 'src/keys.dart' show base58Encode, hdMasterKey, kSeedBytes;
 export 'src/mnemonic.dart';
+export 'src/table_selector.dart';
 export 'src/theme.dart';
 export 'src/theme_set.dart';

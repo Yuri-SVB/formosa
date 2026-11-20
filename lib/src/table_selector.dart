@@ -1,12 +1,15 @@
-/// The Table Selector's logic: a theme's words laid out in a grid whose rows
-/// and columns are named by keys shuffled anew for every word, picked by
-/// typing three keys — so that onlookers learn nothing from the keys typed.
-/// The port of the reference window's `TableSelectorTab`, without its widgets.
+/// The Table Selector (Moon Cake), Formosa's input against shoulder
+/// surfing: a theme's words laid out in a grid whose rows and columns are
+/// named by keys shuffled anew for every word, picked by typing three keys —
+/// so that onlookers learn nothing from the keys typed. The port of the
+/// reference window's `TableSelectorTab`, without its widgets: part of the
+/// library, so any app draws its own table over it.
 library;
 
 import 'dart:math' as math;
 
-import 'package:formosa/formosa.dart';
+import 'mnemonic.dart' show kDefaultTheme;
+import 'theme.dart';
 
 /// Keys per column, line and paragraph of the grid: 8 × 8 × 8 cells.
 const int kGridSide = 8;

@@ -4,10 +4,10 @@ import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:formosa/formosa.dart';
+import 'package:formosa_ui/formosa_ui.dart';
 
 import 'src/converter_tab.dart';
 import 'src/generator_tab.dart';
-import 'src/table_tab.dart';
 import 'src/themes.dart';
 
 /// Where unexpected errors are written, as the reference window does.

@@ -174,4 +174,57 @@ void main() {
     expect(themes.detectTheme(converted), 'tourism');
     expect(_hex(themes['tourism'].toEntropy(converted)), entropies[3]);
   });
+
+  group('raw sentences: 33 bits of entropy each, no checksum', () {
+    test('every theme carries them, bits round-trip', () {
+      final math.Random rng = math.Random(33);
+      for (final String name in themes.names) {
+        final Mnemonic m = themes[name];
+        for (int i = 0; i < 20; i++) {
+          final List<int> bits = <int>[
+            for (int b = 0; b < kRawSentenceBits; b++) rng.nextInt(2),
+          ];
+          final String s = m.toRawSentence(bits);
+          expect(s.split(' '), hasLength(m.wordsPerRawSentence), reason: name);
+          expect(m.rawBits(s), bits, reason: name);
+        }
+      }
+    });
+
+    test('the same bits give the same sentences as the Python reference', () {
+      final List<int> bits = <int>[
+        for (int i = 0; i < kRawSentenceBits; i++) i % 3 == 0 ? 1 : 0,
+      ];
+      expect(themes['farm_animals'].toRawSentence(bits),
+          'defensive dobermann_dog meet coward dachshund_dog cafe');
+      expect(themes['BIP39'].toRawSentence(bits), 'myself empty cause');
+    });
+
+    test('a themed one is a single sentence; a BIP39 one, three words', () {
+      expect(themes['farm_animals'].phrasesPerRawSentence, 1);
+      expect(themes['BIP39'].wordsPerRawSentence, 3);
+    });
+
+    test('no checksum: every 33 bits are a valid sentence', () {
+      final Mnemonic m = themes['farm_animals'];
+      // All ones and all zeros: as a checksummed mnemonic they would need a
+      // matching SHA-256 bit; as raw sentences they are simply entropy.
+      for (final int v in <int>[0, 1]) {
+        final List<int> bits = List<int>.filled(kRawSentenceBits, v);
+        expect(m.rawBits(m.toRawSentence(bits)), bits);
+      }
+    });
+
+    test('generated ones decode; a wrong length or a stray bit is refused',
+        () {
+      final Mnemonic m = themes['sci-fi'];
+      final String s = m.generateRaw(random: math.Random(1));
+      expect(m.rawBits(s), hasLength(kRawSentenceBits));
+      expect(() => m.rawBits('$s ${s.split(' ').first}'), throwsFormatException);
+      expect(() => m.toRawSentence(List<int>.filled(32, 0)),
+          throwsFormatException);
+      expect(() => m.toRawSentence(List<int>.filled(kRawSentenceBits, 2)),
+          throwsFormatException);
+    });
+  });
 }

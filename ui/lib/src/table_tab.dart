@@ -1,8 +1,8 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:formosa/formosa.dart' as formosa;
-
-import 'table_selector.dart';
+import 'package:formosa/formosa.dart'
+    show TableSelector, SelectorStep, Validity, kGridSide, kDefaultKeys;
 
 /// The reference window's colours: a phrase that follows the theme, a word
 /// that would not, a phrase that does not.
