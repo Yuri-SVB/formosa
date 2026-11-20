@@ -26,10 +26,15 @@ class TableTab extends StatefulWidget {
     super.key,
     required this.theme,
     required this.page,
+    this.onPhrase,
   });
 
   final formosa.Theme theme;
   final Widget Function(Widget body, {bool themeEnabled}) page;
+
+  /// Where the phrase picked goes, when the host takes it (a secret typed
+  /// into a field, say); without it, the phrase is copied to the clipboard.
+  final ValueChanged<String>? onPhrase;
 
   @override
   State<TableTab> createState() => _TableTabState();
@@ -179,11 +184,17 @@ class _TableTabState extends State<TableTab> {
             FilledButton(
               onPressed: on && s.complete
                   ? () {
+                      final ValueChanged<String>? take = widget.onPhrase;
+                      if (take != null) {
+                        take(s.output.trim());
+                        return;
+                      }
                       Clipboard.setData(ClipboardData(text: s.output));
                       _act(() => _copied = true);
                     }
                   : null,
-              child: const Text('Generate Phrase'),
+              child: Text(
+                  widget.onPhrase == null ? 'Generate Phrase' : 'Use phrase'),
             ),
             if (_copied) const Text('Copied to clipboard'),
           ],
